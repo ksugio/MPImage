@@ -1,0 +1,29 @@
+LIBRARY	"MPLn23d"
+EXPORTS
+	; ln3d
+	MP_Ln3dAlloc
+	MP_Ln3dFree
+	MP_Ln3dAddCell
+	MP_Ln3dAddGc
+	MP_Ln3dAddGcRandom
+	MP_Ln3dMeasureGc
+	MP_Ln3dMeasureRandom
+	; ln2d
+	MP_Ln2dAlloc
+	MP_Ln2dFree
+	MP_Ln2dAddSection
+	MP_Ln2dAddGc
+	MP_Ln2dAddGcRandom
+	MP_Ln2dMeasureGc
+	MP_Ln2dMeasureRandom
+	MP_Ln2dAverageRadius
+	MP_Ln2dMaximumRadius
+	MP_Ln2dDistRadius
+	MP_Ln2dAreaFraction
+	MP_Ln2dRefGc
+	MP_Ln2dRefRandom
+	; ln23d
+	MP_Ln23dCut
+	MP_Ln23dCutRandom
+	; poisson
+	MP_Poisson
