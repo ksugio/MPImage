@@ -240,6 +240,7 @@ double MP_Ln2dAreaFraction(MP_Ln2dData *data)
 	double total = 0.0;
 	double area = 0.0;	
 
+	if (data->nsec <= 0) return 0.0;
 	for (i = 0; i < data->nsec; i++) {
 		sec = &(data->sec[i]);
 		total += sec->size[0] * sec->size[1];

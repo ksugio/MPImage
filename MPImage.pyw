@@ -264,7 +264,7 @@ class FileWidget(QtGui.QWidget):
     
   def getInfo(self, fname=None):
     if fname == None:
-      if self.org_img != None:
+      if self.org_img is not None:
         height, width, dim = self.org_img.shape
         size = [width, height]
       else:
@@ -324,7 +324,7 @@ class FileWidget(QtGui.QWidget):
       self.setImage()
 
   def setImage(self):
-    if self.org_img != None:
+    if self.org_img is not None:
       height, width, dim = self.org_img.shape
       if self.spin5.value() == width and self.spin6.value() == height:
         self.scene.setImage(self.org_img)
@@ -339,7 +339,7 @@ class FileWidget(QtGui.QWidget):
 
   @staticmethod
   def Process(src_img, info):
-    if src_img != None:
+    if src_img is not None:
       height, width, dim = src_img.shape
       roi = info['FileROI']
       resize = info['FileResize']
@@ -425,12 +425,12 @@ class FilterWidget(QtGui.QWidget):
   def setImage(self):
     if self.insitu:
       dst_img = self.Process(self.src_img, self.getInfo())
-      if dst_img != None:
+      if dst_img is not None:
         self.scene.setImage(dst_img)
 
   @staticmethod
   def Process(src_img, info):
-    if src_img == None:
+    if src_img is None:
       return None
     ftype = info['FilterType']
     size = info['FilterSize']
@@ -526,12 +526,12 @@ class ThresholdWidget(QtGui.QWidget):
   def setImage(self):
     if self.insitu:
       dst_img = self.Process(self.src_img, self.getInfo())
-      if dst_img != None:
+      if dst_img is not None:
         self.scene.setImage(dst_img)
 
   @staticmethod
   def Process(src_img, info):
-    if src_img == None:
+    if src_img is None:
       return None
     if len(src_img.shape) == 3:
       src_img = cv2.cvtColor(src_img, cv2.COLOR_RGB2GRAY)
@@ -598,7 +598,7 @@ class MorphologyWidget(QtGui.QWidget):
   def setImage(self):
     if self.insitu:
       dst_img = self.Process(self.src_img, self.getInfo())
-      if dst_img != None:
+      if dst_img is not None:
         self.scene.setImage(dst_img)
         hist = cv2.calcHist([dst_img], [0], None, [256], [0,256])
         tot = hist[0][0]+hist[255][0]
@@ -611,7 +611,7 @@ class MorphologyWidget(QtGui.QWidget):
 
   @staticmethod
   def Process(src_img, info):
-    if src_img == None:
+    if src_img is None:
       return None
     mtype = info['MorpholType']
     it = info['MorpholIterations']
@@ -767,12 +767,12 @@ class ModifyWidget(QtGui.QWidget):
   def setImage(self):
     if self.insitu:
       dst_img = self.Process(self.src_img, self.org_img, self.getInfo())
-      if dst_img != None:
+      if dst_img is not None:
         self.scene.setImage(dst_img)  
 
   @staticmethod
   def ProcessMod(src_img, info):
-    if src_img == None:
+    if src_img is None:
       return None
     mod_img = src_img.copy()
     for obj in info['ModModifyObjects']:
@@ -784,7 +784,7 @@ class ModifyWidget(QtGui.QWidget):
 
   @staticmethod
   def Process(src_img, org_img, info):
-    if src_img == None:
+    if src_img is None:
       return None
     mod_img = ModifyWidget.ProcessMod(src_img, info)
     conts, hier = cv2.findContours(mod_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
@@ -841,7 +841,7 @@ class GraphScene(QtGui.QGraphicsScene):
     ax.set_xlabel(xlabel)
     ax.set_xlim(0, pixmax*ps)
     if show_stat:
-      stat = self.calcStat(freq)
+      stat = self.calcStat(freq, ps)
       ax.text(0.6, 0.95, 'NSample : ' + str(stat[0]), transform=ax.transAxes)
       ax.text(0.6, 0.9, 'Mean : ' + str(stat[1]), transform=ax.transAxes) 
       ax.text(0.6, 0.85, 'STD : ' + str(stat[3]), transform=ax.transAxes)
@@ -1118,7 +1118,7 @@ class IMFPDialog(QtGui.QDialog):
     self.drawGraph()
 
   def drawGraph(self):
-    if self.freq == None or self.insitu == False:
+    if self.freq is None or self.insitu == False:
       return
     ps = self.parent.pixelsize.data['PS']
     unit = self.parent.pixelsize.data['UNIT']
@@ -1395,7 +1395,7 @@ class LN2DDialog(QtGui.QDialog):
     self.drawGraph()
 
   def drawGraph(self):
-    if self.freq == None or self.insitu == False:
+    if self.freq is None or self.insitu == False:
       return
     if self.combo1.currentIndex() == 0:
       if self.check3.isChecked():
@@ -1777,7 +1777,7 @@ class MainWindow(QtGui.QMainWindow):
       filter_img = self.filter.Process(roi_img, self.filter.getInfo())
       thresh_img = self.threshold.Process(filter_img, self.threshold.getInfo())
       self.modify.src_img = self.morphology.Process(thresh_img, self.morphology.getInfo())
-      if roi_img != None:
+      if roi_img is not None:
         self.modify.org_img = roi_img.copy()
       self.modify.setImage()
       self.modify.setMouseMode()

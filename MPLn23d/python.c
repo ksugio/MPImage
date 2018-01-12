@@ -337,6 +337,11 @@ static PyObject *PyLn2dMeasureRandom(MP_Ln2dData *self, PyObject *args, PyObject
 	Py_RETURN_NONE;
 }
 
+static PyObject *PyLn2dAreaFraction(MP_Ln2dData *self, PyObject *args)
+{
+	return Py_BuildValue("d", MP_Ln2dAreaFraction(self));
+}
+
 static PyObject *PyLn23dCut(MP_Ln2dData *self, PyObject *args, PyObject *kwds)
 {
 	int step, cid, dir;
@@ -385,6 +390,8 @@ static PyMethodDef PyLn2dMethods[] = {
 	"measure_gc(f) : measure on gc" },
 	{ "measure_random", (PyCFunction)PyLn2dMeasureRandom, METH_VARARGS | METH_KEYWORDS,
 	"measure_random(f, nsample) : measure on random point" },
+	{ "area_fraction", (PyCFunction)PyLn2dAreaFraction, METH_NOARGS,
+	"area_fraction() : calculate area fraction" },
 	{ "cut", (PyCFunction)PyLn23dCut, METH_VARARGS | METH_KEYWORDS,
 	"cut(step, ln3d, cid, dir, pos) : cut ln3d cell" },
 	{ "cut_random", (PyCFunction)PyLn23dCutRandom, METH_VARARGS | METH_KEYWORDS,
