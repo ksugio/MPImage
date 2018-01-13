@@ -881,7 +881,7 @@ class GraphScene(QtGui.QGraphicsScene):
       ax.text(0.6, 0.9, 'Av. : ' + str(stat[1]), transform=ax.transAxes)
       ax.text(0.6, 0.85, 'Var. : ' + str(stat[2]), transform=ax.transAxes)
       if prob != None:
-        ax.text(0.6, 0.8, 'Ref. Av. : ' + str(prob[2]), transform=ax.transAxes)
+        ax.text(0.6, 0.80, 'Ref. Av. : ' + str(prob[2]), transform=ax.transAxes)
         ax.text(0.6, 0.75, 'Ref. Var. : ' + str(prob[3]), transform=ax.transAxes)      
     self.canvas.draw()    
 
@@ -932,12 +932,14 @@ class MeasureIMFPThread(QtCore.QThread):
   def __init__(self, parent=None):   
     super(MeasureIMFPThread, self).__init__(parent)
     self.mutex = QtCore.QMutex()
+    self.barrier = 255
     self.nsample = 0
     self.seed = 0
     self.freq = None
     self.image_info = None
 
-  def setup(self, nsample, seed, image_info, freq):
+  def setup(self, barrier, nsample, seed, image_info, freq):
+    self.barrier = barrier
     self.nsample = nsample
     self.seed = seed
     self.image_info = image_info
@@ -956,8 +958,8 @@ class MeasureIMFPThread(QtCore.QThread):
       #cv2.imshow('IMFP measure', mod_img)
       #cv2.waitKey(0)
       #cv2.destroyAllWindows()
-      MPImfp.measure(mod_img, 255, self.freq[0], self.nsample, self.seed, 0)
-      self.seed = MPImfp.measure(mod_img, 255, self.freq[1], self.nsample, self.seed, 1)
+      MPImfp.measure(mod_img, self.barrier, self.freq[0], self.nsample, self.seed, 0)
+      self.seed = MPImfp.measure(mod_img, self.barrier, self.freq[1], self.nsample, self.seed, 1)
       filename = QtCore.QFileInfo(fname).fileName()
       self.Progress.emit(inc, filename)
     self.finished.emit()
@@ -983,6 +985,11 @@ class IMFPDialog(QtGui.QDialog):
     self.scene = GraphScene()
     self.viewer.setScene(self.scene)
     hbox.addWidget(self.viewer)
+    vbox.addWidget(QtGui.QLabel('Barrier :'))
+    self.combo0 = QtGui.QComboBox()
+    self.combo0.addItem('White')  
+    self.combo0.addItem('Black')
+    vbox.addWidget(self.combo0)
     vbox.addWidget(QtGui.QLabel('NSample (x10000) :'))
     self.spin1 = QtGui.QSpinBox()
     self.spin1.setMinimum(1)
@@ -998,7 +1005,7 @@ class IMFPDialog(QtGui.QDialog):
     vbox.addWidget(QtGui.QLabel('Seed :'))
     self.line1 = QtGui.QLineEdit()
     seed = random.randint(1, 1000000000)
-    self.line1.setText(str(seed))     
+    self.line1.setText(str(seed))
     vbox.addWidget(self.line1)
     self.button1 = QtGui.QPushButton('Measure')
     self.button1.clicked[bool].connect(self.measureIMFP)
@@ -1044,6 +1051,7 @@ class IMFPDialog(QtGui.QDialog):
     hbox1.addWidget(self.button4)
 
   def setInfo(self, info):
+    self.combo0.setCurrentIndex(info['Barrier'])
     self.spin1.setValue(info['NSample'])    
     self.spin2.setValue(info['PixelMax'])
     self.line1.setText(info['Seed'])
@@ -1064,6 +1072,7 @@ class IMFPDialog(QtGui.QDialog):
 
   def getInfo(self):
     info = {}
+    info['Barrier'] = self.combo0.currentIndex()
     info['NSample'] = self.spin1.value()
     info['PixelMax'] = self.spin2.value()
     info['Seed'] = str(self.line1.text())
@@ -1083,6 +1092,10 @@ class IMFPDialog(QtGui.QDialog):
 
   def measureIMFP(self):
     if self.parent.image_index >= 0:
+      if self.combo0.currentIndex() == 1:
+        barrier = 0
+      else:
+        barrier = 255
       nsample = self.spin1.value() * 10000
       pixmax = self.spin2.value()
       seed = long(self.line1.text())
@@ -1097,7 +1110,7 @@ class IMFPDialog(QtGui.QDialog):
       self.check1.setEnabled(False)
       self.check2.setEnabled(False)
       self.pbar1.setValue(0)
-      self.measure.setup(nsample, seed, self.parent.image_info, self.freq)        
+      self.measure.setup(barrier, nsample, seed, self.parent.image_info, self.freq)        
       self.measure.start()
 
   def measureProgress(self, inc, filename):
