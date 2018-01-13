@@ -142,6 +142,11 @@ static PyObject *PyLn3dMeasureRandom(MP_Ln3dData *self, PyObject *args, PyObject
 	Py_RETURN_NONE;
 }
 
+static PyObject *PyLn3dVolumeFraction(MP_Ln3dData *self, PyObject *args)
+{
+	return Py_BuildValue("d", MP_Ln3dVolumeFraction(self));
+}
+
 static PyMethodDef PyLn3dMethods[] = {
 	{ "add_cell", (PyCFunction)PyLn3dAddCell, METH_VARARGS | METH_KEYWORDS,
 	"add_cell(step, sx, sy, sz) : add cell" },
@@ -153,6 +158,8 @@ static PyMethodDef PyLn3dMethods[] = {
 	"measure_gc(f) : measure on gc" },
 	{ "measure_random", (PyCFunction)PyLn3dMeasureRandom, METH_VARARGS | METH_KEYWORDS,
 	"measure_random(f, nsample) : measure on random point" },
+	{ "volume_fraction", (PyCFunction)PyLn3dVolumeFraction, METH_NOARGS,
+	"volume_fraction() : calculate volume fraction" },
 	{ NULL }  /* Sentinel */
 };
 

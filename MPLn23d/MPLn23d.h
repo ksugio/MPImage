@@ -69,12 +69,7 @@ int MP_Ln2dAddGc(MP_Ln2dSection *sec, double x, double y, double r);
 int MP_Ln2dAddGcRandom(MP_Ln2dSection *sec, int ngc, double sd, double r, long *seed);
 void MP_Ln2dMeasureGc(MP_Ln2dData *data, int nclass, unsigned int freq[]);
 void MP_Ln2dMeasureRandom(MP_Ln2dData *data, int nclass, unsigned int freq[], int nsample);
-double MP_Ln2dAverageRadius(MP_Ln2dData *data);
-double MP_Ln2dMaximumRadius(MP_Ln2dData *data);
-void MP_Ln2dDistRadius(MP_Ln2dData *data, int nclass, unsigned int freq[], double step_r);
 double MP_Ln2dAreaFraction(MP_Ln2dData *data);
-void MP_Ln2dRefGc(double af, double *a, double *b);
-void MP_Ln2dRefRandom(double af, double *a, double *b);
 
 /*--------------------------------------------------
 * ln3d typedef and functions
@@ -104,6 +99,7 @@ int MP_Ln3dAddGc(MP_Ln3dCell *cell, double x, double y, double z, double r);
 int MP_Ln3dAddGcRandom(MP_Ln3dCell *cell, int ngc, double sd, double r, long *seed);
 void MP_Ln3dMeasureGc(MP_Ln3dData *data, int nclass, unsigned int freq[]);
 void MP_Ln3dMeasureRandom(MP_Ln3dData *data, int nclass, unsigned int freq[], int nsample);
+double MP_Ln3dVolumeFraction(MP_Ln3dData *data);
 
 /*--------------------------------------------------
 * cut functions
@@ -156,11 +152,6 @@ int MP_Neigh3dDivide(MP_Neigh3dData *data, double rcut,
 	int num, double size[], double x[], double y[], double z[]);
 int MP_Neigh3dNumber(MP_Neigh3dData *data, double rcut, double size[],
 	double cx, double cy, double cz, double x[], double y[], double z[]);
-
-/*--------------------------------------------------
-* poisson functions
-*/
-double MP_Poisson(double a, double b, double x);
 
 #ifdef __cplusplus
 }

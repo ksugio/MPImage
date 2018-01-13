@@ -91,7 +91,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="cut.c" />
-    <ClCompile Include="poisson.c" />
     <ClCompile Include="ln2d.c" />
     <ClCompile Include="ln3d.c" />
     <ClCompile Include="neigh2d.c" />

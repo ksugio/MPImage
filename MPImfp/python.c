@@ -54,7 +54,7 @@ static PyObject *PyImfpMeasure(PyObject *self, PyObject *args, PyObject *kwds)
 
 static PyMethodDef PyImfpMethods[] = {
 	{ "measure", (PyCFunction)PyImfpMeasure, METH_VARARGS | METH_KEYWORDS,
-	"measure(img, f, nsample, seed, dflag) : measure image mean free path" },
+	"measure(img, barrier, f, nsample, seed, dflag) : measure image mean free path" },
 	{ NULL }  /* Sentinel */
 };
 

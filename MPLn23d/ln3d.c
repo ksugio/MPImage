@@ -183,3 +183,20 @@ void MP_Ln3dMeasureRandom(MP_Ln3dData *data, int nclass, unsigned int freq[], in
 	MP_Neigh3dFree(&neigh3d);
 }
 
+double MP_Ln3dVolumeFraction(MP_Ln3dData *data)
+{
+	int i, j;
+	MP_Ln3dCell *cell;
+	double total = 0.0;
+	double vol = 0.0;
+
+	if (data->ncell <= 0) return -1.0;
+	for (i = 0; i < data->ncell; i++) {
+		cell = &(data->cell[i]);
+		total += cell->size[0] * cell->size[1] * cell->size[2];
+		for (j = 0; j < cell->ngc; j++) {
+			vol += 4.0 / 3.0 * M_PI * cell->r[j] * cell->r[j] * cell->r[j];
+		}
+	}
+	return vol / total;
+}

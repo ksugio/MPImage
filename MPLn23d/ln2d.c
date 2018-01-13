@@ -173,66 +173,6 @@ void MP_Ln2dMeasureRandom(MP_Ln2dData *data, int nclass, unsigned int freq[], in
 	MP_Neigh2dFree(&neigh2d);
 }
 
-double MP_Ln2dAverageRadius(MP_Ln2dData *data)
-{
-	int i, j;
-	int ntot = 0;
-	double stot = 0.0;
-	MP_Ln2dSection *sec;
-
-	for (i = 0; i < data->nsec; i++) {
-		sec = &(data->sec[i]);
-		for (j = 0; j < sec->ngc; j++) {
-			stot += sec->r[j];
-			ntot++;
-		}
-	}
-	return stot / ntot;
-}
-
-double MP_Ln2dMaximumRadius(MP_Ln2dData *data)
-{
-	int i, j;
-	double max = 0.0;
-	MP_Ln2dSection *sec;
-
-	for (i = 0; i < data->nsec; i++) {
-		sec = &(data->sec[i]);
-		for (j = 0; j < sec->ngc; j++) {
-			if (sec->r[j] > max) max = sec->r[j];
-		}
-	}
-	return max;
-}
-
-static int rank2d(double r, int nclass, double step_r)
-{
-	int i;
-	double min, max;
-
-	for (i = 0; i < nclass; i++) {
-		min = step_r * i;
-		max = step_r * (i + 1);
-		if (r >= min && r < max) break;
-	}
-	return i;
-}
-
-void MP_Ln2dDistRadius(MP_Ln2dData *data, int nclass, unsigned int freq[], double step_r)
-{
-	int i, j;
-	int rank;
-	MP_Ln2dSection *sec;
-
-	for (i = 0; i < data->nsec; i++) {
-		sec = &(data->sec[i]);
-		for (j = 0; j < sec->ngc; j++) {
-			rank = rank2d(sec->r[j], nclass, step_r);
-			if (rank < nclass) freq[rank]++;
-		}
-	}
-}
-
 double MP_Ln2dAreaFraction(MP_Ln2dData *data)
 {
 	int i, j;
@@ -240,7 +180,7 @@ double MP_Ln2dAreaFraction(MP_Ln2dData *data)
 	double total = 0.0;
 	double area = 0.0;	
 
-	if (data->nsec <= 0) return 0.0;
+	if (data->nsec <= 0) return -1.0;
 	for (i = 0; i < data->nsec; i++) {
 		sec = &(data->sec[i]);
 		total += sec->size[0] * sec->size[1];
@@ -249,20 +189,4 @@ double MP_Ln2dAreaFraction(MP_Ln2dData *data)
 		}
 	}
 	return area / total;
-}
-
-void MP_Ln2dRefGc(double af, double *a, double *b)
-{
-	double p[4] = { 6.19189515, 5.819413786, 5.165487049, 5.792789273 };
-
-	*a = p[0] * (exp(-p[1] * af) - 1) + 7;
-	*b = p[2] * (1 - exp(-p[3] * af)) + 1;
-}
-
-void MP_Ln2dRefRandom(double af, double *a, double *b)
-{
-	double p[2] = { 5.827733409, 6.075480283 };
-
-	*a = p[0] * (exp(-p[1] * af) - 1) + 7;
-	*b = 7 - *a;
 }
