@@ -1,7 +1,7 @@
 # MPImfp
 Python library to measure the image mean free path (IMFP).
 
-## Compile in Windows
+# Compile in Windows
 Visual Studio Community and Python library are required to create MPImfp.dll (MPImfp.pyd).
 Open MPImfp.sln and set include path and library path according to [Property Manager] - [Microsoft.cpp.Win32.user] - [VC++ Directory] - [Include Directory] and [Library Directory].
 Example of include path is shown.
@@ -16,7 +16,7 @@ Example of library path is shown.
 
 Build in Release mode and MPImfp.pyd is copied to the root directory.
 
-## Compile in Linux
+# Compile in Linux
 Edit Makefile and execute make.
 
     vi Makefile
@@ -24,9 +24,9 @@ Edit Makefile and execute make.
 
 MPImfp.so is created and copied to the root directory.
 
-## References
-### Methods :
-#### measure(img, barrier, f, nsample, seed, dflag)
+# References
+## Methods :
+### measure(img, barrier, f, nsample, seed, dflag)
 measure image mean free path
 + img : input image
 + barrier : pixel value of barrier, 0 - 255
