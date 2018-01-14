@@ -25,8 +25,8 @@ Edit Makefile and execute make.
 MPImfp.so is created and copied to the root directory.
 
 # References
-## Methods :
-### measure(img, barrier, f, nsample, seed, dflag)
+### Methods :
+#### measure(img, barrier, f, nsample, seed, dflag)
 measure image mean free path
 + img : input image
 + barrier : pixel value of barrier, 0 - 255
