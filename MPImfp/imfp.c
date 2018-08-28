@@ -70,7 +70,7 @@ static double ImfpLength(unsigned char *data, int step, int width, int height,
 }
 
 void MP_ImfpMeasure(unsigned char *data, int step, int width, int height,
-	unsigned char barrier, int nclass, unsigned int freq[], int nsample, long *seed, int dflag)
+	unsigned char barrier, int nclass, unsigned int freq[], double dpix, int nsample, long *seed, int dflag)
 {
 	int n = 0;
 	int	cl;
@@ -79,7 +79,7 @@ void MP_ImfpMeasure(unsigned char *data, int step, int width, int height,
 	while (n < nsample) {
 		len = ImfpLength(data, step, width, height, barrier, seed, dflag);
 		if (len >= 0.0) {
-			cl = (int)(len + 0.5);
+			cl = (int)((len + 0.5) / dpix);
 			if (cl < nclass) (freq[cl])++;
 			n++;
 		}

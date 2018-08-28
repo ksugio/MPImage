@@ -8,6 +8,7 @@ static PyObject *PyImfpMeasure(PyObject *self, PyObject *args, PyObject *kwds)
 {	
 	PyObject *img_obj, *f_obj;
 	unsigned char barrier;
+	double dpix;
 	int nsample;
 	long seed;
 	int dflag;
@@ -16,9 +17,9 @@ static PyObject *PyImfpMeasure(PyObject *self, PyObject *args, PyObject *kwds)
 	npy_intp *img_strides;
 	unsigned char *img_data;
 	int *f_data;
-	static char *kwlist[] = { "img", "barrier", "f", "nsample", "seed", "dflag", NULL };
+	static char *kwlist[] = { "img", "barrier", "f", "dpix", "nsample", "seed", "dflag", NULL };
 
-	if (!PyArg_ParseTupleAndKeywords(args, kwds, "ObO!ili", kwlist, &img_obj, &barrier, &PyArray_Type, &f_obj, &nsample, &seed, &dflag)) {
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, "ObO!dili", kwlist, &img_obj, &barrier, &PyArray_Type, &f_obj, &dpix, &nsample, &seed, &dflag)) {
 		return NULL;
 	}
 	img_arr = (PyArrayObject *)PyArray_FROM_OTF(img_obj, NPY_UINT8, NPY_IN_ARRAY);
@@ -46,7 +47,7 @@ static PyObject *PyImfpMeasure(PyObject *self, PyObject *args, PyObject *kwds)
 	f_shape = PyArray_DIM(f_arr, 0);
 	f_data = (unsigned int *)PyArray_DATA(f_arr);
 	MP_ImfpMeasure(img_data, img_strides[0], img_width, img_height,
-		barrier, f_shape, f_data, nsample, &seed, dflag);
+		barrier, f_shape, f_data, dpix, nsample, &seed, dflag);
 	Py_DECREF(img_arr);
 	Py_DECREF(f_arr);
 	return Py_BuildValue("l", seed);
@@ -54,7 +55,7 @@ static PyObject *PyImfpMeasure(PyObject *self, PyObject *args, PyObject *kwds)
 
 static PyMethodDef PyImfpMethods[] = {
 	{ "measure", (PyCFunction)PyImfpMeasure, METH_VARARGS | METH_KEYWORDS,
-	"measure(img, barrier, f, nsample, seed, dflag) : measure image mean free path" },
+	"measure(img, barrier, f, dpix, nsample, seed, dflag) : measure image mean free path" },
 	{ NULL }  /* Sentinel */
 };
 

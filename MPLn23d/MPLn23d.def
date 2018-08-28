@@ -21,3 +21,5 @@ EXPORTS
 	; ln23d
 	MP_Ln23dCut
 	MP_Ln23dCutRandom
+	; stat
+	MP_StatCalc

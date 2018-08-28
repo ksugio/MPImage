@@ -97,6 +97,7 @@
     <ClCompile Include="neigh3d.c" />
     <ClCompile Include="python.c" />
     <ClCompile Include="rand.c" />
+    <ClCompile Include="stat.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="MPLn23d.h" />

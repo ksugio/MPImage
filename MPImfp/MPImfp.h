@@ -19,7 +19,7 @@ extern "C" {
 *  Imfp functions
 */
 void MP_ImfpMeasure(unsigned char *data, int step, int width, int height,
-	unsigned char barrier, int nclass, unsigned int freq[], int nsample, long *seed, int dflag);
+	unsigned char barrier, int nclass, unsigned int freq[], double dpix, int nsample, long *seed, int dflag);
 
 /*--------------------------------------------------
 *  Rand functions

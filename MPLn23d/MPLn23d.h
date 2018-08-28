@@ -108,6 +108,11 @@ int MP_Ln23dCut(MP_Ln2dData *ln2d, int ngc_step, MP_Ln3dCell *cell, int dir, dou
 int MP_Ln23dCutRandom(MP_Ln2dData *ln2d, int nsec, int ngc_step, MP_Ln3dCell *cell, long *seed);
 
 /*--------------------------------------------------
+* stat functions
+*/
+int MP_StatCalc(int nclass, unsigned int freq[], double rfreq[], double *ave, double *var);
+
+/*--------------------------------------------------
 * random functions
 */
 float MP_Rand(long *rand_seed);

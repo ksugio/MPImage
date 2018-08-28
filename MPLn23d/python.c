@@ -448,7 +448,39 @@ static PyTypeObject PyLn2dNewType = {
 	PyLn2dNew,					/* tp_new */
 };
 
+static PyObject *PyStatCalc(PyObject *self, PyObject *args, PyObject *kwds)
+{
+	static char *kwlist[] = { "f", NULL };
+	PyObject *f_obj, *rf_obj;
+	PyArrayObject *f_arr;
+	npy_intp f_shape, rf_dim[1];
+	unsigned int *f_data;
+	double *rf_data;
+	double ave, var;
+	int total;
+
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!", kwlist, &PyArray_Type, &f_obj)) {
+		return NULL;
+	}
+	f_arr = (PyArrayObject *)PyArray_FROM_OTF(f_obj, NPY_UINT, NPY_INOUT_ARRAY);
+	if (f_arr == NULL) return NULL;
+	if (PyArray_NDIM(f_arr) != 1) {
+		Py_XDECREF(f_arr);
+		PyErr_SetString(PyExc_ValueError, "invalid freq data, ndim must be 1");
+		return NULL;
+	}
+	f_shape = PyArray_DIM(f_arr, 0);
+	f_data = (unsigned int *)PyArray_DATA(f_arr);
+	rf_dim[0] = f_shape;
+	rf_obj = PyArray_SimpleNew(1, rf_dim, NPY_FLOAT64);
+	rf_data = (double *)PyArray_DATA((PyArrayObject *)rf_obj);
+	total =	MP_StatCalc(f_shape, f_data, rf_data, &ave, &var);
+	return Py_BuildValue("(idd)O", total, ave, var, rf_obj);
+}
+
 static PyMethodDef MPLn23dPyMethods[] = {
+	{ "stat_calc", (PyCFunction)PyStatCalc, METH_VARARGS | METH_KEYWORDS,
+	"stat_calc(f, rf) : return total number, average, variance and relative frequency" },
 	{ NULL }  /* Sentinel */
 };
 
