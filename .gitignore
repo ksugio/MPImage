@@ -158,7 +158,6 @@ $RECYCLE.BIN/
 .DS_Store
 
 # for python
-*.pyd
 *.dll
 *.json
 
