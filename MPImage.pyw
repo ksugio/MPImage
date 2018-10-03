@@ -35,7 +35,7 @@ class ImageScene(QtGui.QGraphicsScene):
 
   def __init__(self, *argv, **keywords):
     super(ImageScene, self).__init__(*argv, **keywords)
-    self.pixmap = None
+    self.cvimg = None
     self.imageItem = None
     self.roiItem = None
     self.scale = 1.0
@@ -43,6 +43,7 @@ class ImageScene(QtGui.QGraphicsScene):
     self.mouseMode = self.mouseNone
 
   def setImage(self, cvimg):
+    self.cvimg = cvimg
     if len(cvimg.shape) == 2:
       height, width = cvimg.shape
       qimg = QtGui.QImage(cvimg.data, width, height, width, QtGui.QImage.Format_Indexed8)
@@ -50,14 +51,15 @@ class ImageScene(QtGui.QGraphicsScene):
       height, width, dim = cvimg.shape      
       qimg = QtGui.QImage(cvimg.data, width, height, dim*width, QtGui.QImage.Format_RGB888)
       qimg = qimg.rgbSwapped()
-    self.pixmap = QtGui.QPixmap.fromImage(qimg)
+    pixmap = QtGui.QPixmap.fromImage(qimg)
     if self.imageItem:
       self.removeItem(self.imageItem)
-    self.imageItem = QtGui.QGraphicsPixmapItem(self.pixmap)
+    self.imageItem = QtGui.QGraphicsPixmapItem(pixmap)
     self.addItem(self.imageItem)
     self.__Scale()
 
   def clearImage(self):
+    self.cvimg = None
     if self.imageItem:
       self.removeItem(self.imageItem)
       self.imageItem = None
@@ -65,8 +67,8 @@ class ImageScene(QtGui.QGraphicsScene):
   def __Scale(self):
     if self.imageItem:
       self.imageItem.setScale(self.scale)
-      w = self.scale * self.pixmap.width()
-      h = self.scale * self.pixmap.height()
+      w = self.scale * self.cvimg.shape[1]
+      h = self.scale * self.cvimg.shape[0]
       self.setSceneRect(0, 0, w, h)
     if self.roiItem:
       self.roiItem.setScale(self.scale)
@@ -76,10 +78,10 @@ class ImageScene(QtGui.QGraphicsScene):
     self.__Scale()
 
   def calcFitScale(self):
-    if self.pixmap != None:
+    if self.cvimg is not None:
       view = self.views()[0]      
-      sw = float(view.width()) / float(self.pixmap.width())
-      sh = float(view.height()) / float(self.pixmap.height())
+      sw = float(view.width()) / float(self.cvimg.shape[1])
+      sh = float(view.height()) / float(self.cvimg.shape[0])
       if sw < sh:
         return sw
       else:
@@ -105,7 +107,7 @@ class ImageScene(QtGui.QGraphicsScene):
   def clearAll(self):
     self.clearImage()
     self.clearROI()
-    
+
   def mousePressEvent(self, event):
     if self.imageItem and event.button() == QtCore.Qt.LeftButton:
       self.startPos = event.scenePos()
@@ -167,6 +169,9 @@ class ImageScene(QtGui.QGraphicsScene):
       self.startPos = None
     super(ImageScene, self).mouseReleaseEvent(event)
 
+  def setMouseMode(self, mode):
+    self.mouseMode = mode
+
 """
 Graphics View
 """  
@@ -183,9 +188,12 @@ class GraphicsView(QtGui.QGraphicsView):
 File Widget
 """  
 class FileWidget(QtGui.QWidget):
-  def __init__(self, parent, scene):
+  imageChanged = QtCore.pyqtSignal(np.ndarray)
+  roiChanged = QtCore.pyqtSignal(int, int, int, int)
+  Units = ['pixel', 'km', 'm', 'cm', 'mm', 'um', 'nm' ]
+  
+  def __init__(self, parent):
     super(FileWidget, self).__init__(parent)
-    self.scene = scene
     self.org_img = None
     self.insitu = True
     vbox = QtGui.QVBoxLayout(self)
@@ -220,6 +228,30 @@ class FileWidget(QtGui.QWidget):
     button2 = QtGui.QPushButton('Reset ROI')
     button2.clicked[bool].connect(self.resetROI)
     vbox.addWidget(button2)
+    vbox.addWidget(QtGui.QLabel('Pixels in Scale :'))
+    hbox0 = QtGui.QHBoxLayout()
+    vbox.addLayout(hbox0)
+    self.line1 = QtGui.QLineEdit()
+    self.line1.setValidator(QtGui.QDoubleValidator())
+    self.line1.setText('1.0')
+    hbox0.addWidget(self.line1)
+    self.button3 = QtGui.QPushButton('Measure')
+    self.button3.setCheckable(True)
+    hbox0.addWidget(self.button3)
+    vbox.addWidget(QtGui.QLabel('Scale :'))
+    hbox1 = QtGui.QHBoxLayout()
+    vbox.addLayout(hbox1)
+    self.line2 = QtGui.QLineEdit()
+    self.line2.setValidator(QtGui.QDoubleValidator())
+    self.line2.setText('1.0')
+    hbox1.addWidget(self.line2)
+    self.combo = QtGui.QComboBox()
+    for unit in self.Units:
+      self.combo.addItem(unit)
+    hbox1.addWidget(self.combo)
+    self.check1 = QtGui.QCheckBox('Measure')
+    self.check1.setChecked(True)
+    vbox.addWidget(self.check1)
     vbox.addStretch()
 
   def clearFile(self):
@@ -230,7 +262,11 @@ class FileWidget(QtGui.QWidget):
     self.spin1.setValue(0)
     self.spin2.setValue(0)        
     self.spin3.setValue(0)
-    self.spin4.setValue(0)   
+    self.spin4.setValue(0)
+    self.line1.setText('1.0')
+    self.line2.setText('1.0')
+    self.combo.setCurrentIndex(0)
+    self.check1.setChecked(True)
     self.insitu = True
     
   def setInfo(self, info):
@@ -261,23 +297,32 @@ class FileWidget(QtGui.QWidget):
     self.spin6.setMaximum(10*size[1])
     self.spin6.setValue(resize[1])
     self.insitu = True
+    self.line1.setText(str(info['FilePixels']))
+    self.line2.setText(str(info['FileScale']))
+    self.combo.setCurrentIndex(info['FileUnit'])
+    self.check1.setChecked(info['FileMeasure'])
     
   def getInfo(self, fname=None):
+    info = {}
     if fname == None:
       if self.org_img is not None:
         height, width, dim = self.org_img.shape
-        size = [width, height]
+        info['FileSize'] = [width, height]
       else:
-        size = [0, 0]
-      resize = [self.spin5.value(), self.spin6.value()]
-      roi = [self.spin1.value(), self.spin2.value(), self.spin3.value(), self.spin4.value()]
-      return {'FileSize':size, 'FileResize':resize, 'FileROI':roi}
+        info['FileSize'] = [0, 0]
+      info['FileResize'] = [self.spin5.value(), self.spin6.value()]
+      info['FileROI'] = [self.spin1.value(), self.spin2.value(), self.spin3.value(), self.spin4.value()]
     else:
       img = cv2.imread(str(fname), 1)
       height, width, dim = img.shape
-      size = [width, height]
-      roi = [0, 0, width, height]
-      return {'FileSize':size, 'FileResize':size, 'FileROI':roi}
+      info['FileSize'] = [width, height]
+      info['FileResize'] = [width, height]
+      info['FileROI'] = [0, 0, width, height]
+    info['FilePixels'] = float(self.line1.text())
+    info['FileScale'] = float(self.line2.text())
+    info['FileUnit'] = self.combo.currentIndex()
+    info['FileMeasure'] = self.check1.isChecked()
+    return info
 
   def changeROI(self):
     if self.insitu:
@@ -285,7 +330,7 @@ class FileWidget(QtGui.QWidget):
       sy = self.spin2.value()
       ex = self.spin3.value()
       ey = self.spin4.value()
-      self.scene.drawROI(sx, sy, ex-sx, ey-sy)
+      self.roiChanged.emit(sx, sy, ex-sx, ey-sy)
  
   def resetROI(self):
     self.initROI()
@@ -327,15 +372,20 @@ class FileWidget(QtGui.QWidget):
     if self.org_img is not None:
       height, width, dim = self.org_img.shape
       if self.spin5.value() == width and self.spin6.value() == height:
-        self.scene.setImage(self.org_img)
+        self.imageChanged.emit(self.org_img)
       else:
         res_img = cv2.resize(self.org_img, (self.spin5.value(), self.spin6.value()))
-        self.scene.setImage(res_img)
+        self.imageChanged.emit(res_img)
       sx = self.spin1.value()
       sy = self.spin2.value()
       ex = self.spin3.value()
       ey = self.spin4.value()
-      self.scene.drawROI(sx, sy, ex-sx, ey-sy)
+      self.roiChanged.emit(sx, sy, ex-sx, ey-sy)
+
+  def measurePixel(self, dis):
+    if self.button3.isChecked():
+      mdis = dis*self.org_img.shape[1]/self.spin5.value()
+      self.line1.setText(str(mdis))
 
   @staticmethod
   def Process(src_img, info):
@@ -351,13 +401,138 @@ class FileWidget(QtGui.QWidget):
     else:
       return None
 
+  @staticmethod
+  def PixelSize(info):
+    size = info['FileSize']
+    resize = info['FileResize']
+    pixels = info['FilePixels']
+    scale = info['FileScale']
+    unit = info['FileUnit']
+    ps = scale/pixels*size[0]/resize[0]
+    return [ps, FileWidget.Units[unit]]
+
+"""
+Contrast Widget
+"""  
+class ContrastWidget(QtGui.QWidget):
+  imageChanged = QtCore.pyqtSignal(np.ndarray)
+  
+  def __init__(self, parent):
+    super(ContrastWidget, self).__init__(parent)
+    self.src_img = None
+    self.insitu = True
+    vbox = QtGui.QVBoxLayout(self)
+    self.figure = Figure(figsize=(1,2))
+    self.figure.subplots_adjust(bottom=0.1, top=0.98, left=0.02, right=0.98, hspace=0.02)
+    self.canvas = FigureCanvas(self.figure)
+    vbox.addWidget(self.canvas)
+    self.check1 = QtGui.QCheckBox('Background Subtraction')
+    self.check1.stateChanged[int].connect(self.setImage)
+    vbox.addWidget(self.check1)
+    vbox.addWidget(QtGui.QLabel('Filter Size :'))
+    self.spin1 = QtGui.QSpinBox()
+    self.spin1.setMinimum(1)
+    self.spin1.setMaximum(1999)
+    self.spin1.setSingleStep(2)
+    self.spin1.setValue(255)
+    self.spin1.valueChanged[int].connect(self.setImage)
+    vbox.addWidget(self.spin1)
+    vbox.addWidget(QtGui.QLabel('LUT Min. and Max. :'))
+    hbox = QtGui.QHBoxLayout()
+    vbox.addLayout(hbox)
+    self.spin2 = QtGui.QSpinBox()
+    self.spin2.setMinimum(0)
+    self.spin2.setMaximum(255)
+    self.spin2.setValue(0)
+    self.spin2.valueChanged[int].connect(self.setImage)
+    hbox.addWidget(self.spin2)
+    self.spin3 = QtGui.QSpinBox()
+    self.spin3.setMinimum(0)
+    self.spin3.setMaximum(255)
+    self.spin3.setValue(255)
+    self.spin3.valueChanged[int].connect(self.setImage)
+    hbox.addWidget(self.spin3)
+    vbox.addStretch()
+
+  def setInfo(self, info):
+    self.insitu = False
+    self.check1.setChecked(info['ContBGSubtract'])
+    self.spin1.setValue(info['ContFilterSize'])
+    self.spin2.setValue(info['ContLUTMin'])
+    self.spin3.setValue(info['ContLUTMax'])
+    self.insitu = True
+
+  def getInfo(self):
+    info = {}
+    info['ContBGSubtract'] = self.check1.isChecked()
+    info['ContFilterSize'] = self.spin1.value()
+    info['ContLUTMin'] = self.spin2.value()
+    info['ContLUTMax'] = self.spin3.value()
+    return info
+
+  def setImage(self):
+    if self.insitu:
+      dst_img = self.Process(self.src_img, self.getInfo())
+      if dst_img is not None:
+        self.drawGraph(self.src_img, dst_img)
+        self.imageChanged.emit(dst_img)
+
+  def drawHist(self, img, ax):
+    lv = range(256)
+    if len(img.shape) == 2:
+      hist = cv2.calcHist([img], [0], None, [256], [0,256])
+      ax.plot(lv, hist, 'k')
+    elif len(img.shape) == 3:
+      col = ['b', 'g', 'r']
+      for i in range(3):
+        hist = cv2.calcHist([img], [i], None, [256], [0,256])
+        ax.plot(lv, hist, col[i])
+    ax.set_xlim(0, 255)
+
+  def drawGraph(self, src_img, dst_img):
+    self.figure.clf()
+    ax1 = self.figure.add_subplot(2,1,1)
+    ax1.xaxis.set_ticklabels([])
+    ax1.yaxis.set_ticklabels([])
+    self.drawHist(src_img, ax1)
+    ax2 = self.figure.add_subplot(2,1,2)
+    ax2.yaxis.set_ticklabels([])
+    self.drawHist(dst_img, ax2)
+    self.canvas.draw()
+
+  @staticmethod
+  def Process(src_img, info):
+    if src_img is None:
+      return None
+    if info['ContBGSubtract']:
+      fsize = info['ContFilterSize']
+      fore = src_img.astype(np.int32)
+      back = cv2.blur(src_img, (fsize, fsize)).astype(np.int32)
+      sub = fore-back+127
+      img = sub.astype(np.uint8)
+    else:
+      img = src_img
+    lutmin = info['ContLUTMin']
+    lutmax = info['ContLUTMax']
+    diff = lutmax-lutmin
+    lut = np.empty((256, 1), dtype='uint8')
+    for i in range(256):
+      if i <= lutmin:
+        lut[i][0] = 0
+      elif i >= lutmax:
+        lut[i][0] = 255
+      else:
+        lut[i][0] = 255*(i-lutmin)/diff
+    return cv2.LUT(img, lut)
+
 """
 Filter Widget
 """  
 class FilterWidget(QtGui.QWidget):
-  def __init__(self, parent, scene):
+  imageChanged = QtCore.pyqtSignal(np.ndarray)
+  
+  def __init__(self, parent):
     super(FilterWidget, self).__init__(parent)
-    self.scene = scene
     self.src_img = None
     self.insitu = True
     vbox = QtGui.QVBoxLayout(self)
@@ -426,7 +601,7 @@ class FilterWidget(QtGui.QWidget):
     if self.insitu:
       dst_img = self.Process(self.src_img, self.getInfo())
       if dst_img is not None:
-        self.scene.setImage(dst_img)
+        self.imageChanged.emit(dst_img)
 
   @staticmethod
   def Process(src_img, info):
@@ -451,9 +626,10 @@ class FilterWidget(QtGui.QWidget):
 Threshold Widget
 """  
 class ThresholdWidget(QtGui.QWidget):
-  def __init__(self, parent, scene):
+  imageChanged = QtCore.pyqtSignal(np.ndarray)
+
+  def __init__(self, parent):
     super(ThresholdWidget, self).__init__(parent)
-    self.scene = scene
     self.src_img = None
     self.dst_img = None
     self.insitu = True
@@ -527,7 +703,7 @@ class ThresholdWidget(QtGui.QWidget):
     if self.insitu:
       dst_img = self.Process(self.src_img, self.getInfo())
       if dst_img is not None:
-        self.scene.setImage(dst_img)
+        self.imageChanged.emit(dst_img)
 
   @staticmethod
   def Process(src_img, info):
@@ -558,9 +734,10 @@ class ThresholdWidget(QtGui.QWidget):
 Morphology Widget
 """  
 class MorphologyWidget(QtGui.QWidget):
-  def __init__(self, parent, scene):
+  imageChanged = QtCore.pyqtSignal(np.ndarray)
+  
+  def __init__(self, parent):
     super(MorphologyWidget, self).__init__(parent)
-    self.scene = scene
     self.src_img = None
     self.insitu = True
     vbox = QtGui.QVBoxLayout(self)
@@ -599,7 +776,7 @@ class MorphologyWidget(QtGui.QWidget):
     if self.insitu:
       dst_img = self.Process(self.src_img, self.getInfo())
       if dst_img is not None:
-        self.scene.setImage(dst_img)
+        self.imageChanged.emit(dst_img)
         hist = cv2.calcHist([dst_img], [0], None, [256], [0,256])
         tot = hist[0][0]+hist[255][0]
         self.label1.setText('Black : ' + str(100.0*hist[0][0]/tot) + ' %')
@@ -628,12 +805,11 @@ class MorphologyWidget(QtGui.QWidget):
 Modify Widget
 """  
 class ModifyWidget(QtGui.QWidget):
-  def __init__(self, parent, scene):
+  imageChanged = QtCore.pyqtSignal(np.ndarray)
+  mouseModeChanged = QtCore.pyqtSignal(int)
+
+  def __init__(self, parent):
     super(ModifyWidget, self).__init__(parent)
-    self.scene = scene
-    self.scene.addLine[float, float, float, float].connect(self.addLine)
-    self.scene.addRect[float, float, float, float].connect(self.addRect)
-    self.scene.clearRect[float, float, float, float].connect(self.clearRect)    
     self.src_img = None
     self.org_img = None
     self.mod_objects = []
@@ -729,11 +905,11 @@ class ModifyWidget(QtGui.QWidget):
   def setMouseMode(self):
     if self.insitu:
       if self.group2.checkedId() == 0:
-        self.scene.mouseMode = self.scene.mouseLine
+        self.mouseModeChanged.emit(ImageScene.mouseLine)
       elif self.group2.checkedId() == 1:
-        self.scene.mouseMode = self.scene.mouseRect
+        self.mouseModeChanged.emit(ImageScene.mouseRect)
       elif self.group2.checkedId() == 2:
-        self.scene.mouseMode = self.scene.mouseClear  
+        self.mouseModeChanged.emit(ImageScene.mouseClear)
 
   def setInfo(self, info):
     self.insitu = False
@@ -768,7 +944,7 @@ class ModifyWidget(QtGui.QWidget):
     if self.insitu:
       dst_img = self.Process(self.src_img, self.org_img, self.getInfo())
       if dst_img is not None:
-        self.scene.setImage(dst_img)  
+        self.imageChanged.emit(dst_img)
 
   @staticmethod
   def ProcessMod(src_img, info):
@@ -816,153 +992,83 @@ class ModifyWidget(QtGui.QWidget):
     return draw_img
 
 """
-Graph Scene
+Misc Functions
 """
-class GraphScene(QtGui.QGraphicsScene):
-  def __init__(self, *argv, **keywords):
-    super(GraphScene, self).__init__(*argv, **keywords)
-    self.figure = Figure()
-    self.canvas = FigureCanvas(self.figure)
-    self.canvas.setGeometry(0, 0, 640, 480)
-    #self.canvas.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding)
-    self.canvas.updateGeometry()
-    self.addWidget(self.canvas)
+def PlotUnitText(unit):
+  if unit == 'um':
+    return '$\mu$m'
+  else:
+    return unit
 
-  def drawIMFP(self, freq, xlabel, ps, pixmax, rf_plot, show_stat):
-    self.figure.clf()
-    ax = self.figure.add_subplot(1,1,1)
-    length = np.arange(freq.size) * ps
-    if rf_plot:
-      ax.plot(length, self.rFreq(freq), 'k-')
-      ax.set_ylabel('Relative Frequency')
-    else:
-      ax.plot(length, freq, 'k-')
-      ax.set_ylabel('Frequency')
-    ax.set_xlabel(xlabel)
-    ax.set_xlim(0, pixmax*ps)
-    if show_stat:
-      stat = self.calcStat(freq, ps)
-      ax.text(0.6, 0.95, 'NSample : ' + str(stat[0]), transform=ax.transAxes)
-      ax.text(0.6, 0.9, 'Mean : ' + str(stat[1]), transform=ax.transAxes) 
-      ax.text(0.6, 0.85, 'STD : ' + str(stat[3]), transform=ax.transAxes)
-    self.canvas.draw()
-
-  def drawSize(self, data, xlabel, bins, show_stat):
-    self.figure.clf()
-    ax = self.figure.add_subplot(1,1,1)
-    ax.hist(data, bins=bins, color='white', rwidth=0.8)
-    ax.set_ylabel('Frequency')
-    ax.set_xlabel(xlabel)
-    if show_stat:
-      ax.text(0.6, 0.95, 'NSample : ' + str(data.shape[0]), transform=ax.transAxes)
-      ax.text(0.6, 0.9, 'Mean : ' + str(data.mean()), transform=ax.transAxes) 
-      ax.text(0.6, 0.85, 'STD : ' + str(data.std()), transform=ax.transAxes)
-    self.canvas.draw()
-
-  def drawLN2D(self, freq, xlabel, lnmax, rf_plot, show_stat, prob):
-    self.figure.clf()
-    ax = self.figure.add_subplot(1,1,1)
-    if rf_plot:
-      ax.bar(np.arange(freq.size)-0.4, self.rFreq(freq), color='white')
-      if prob != None:
-        ax.plot(prob[0], prob[1], 'k-')
-      ax.set_ylabel('Relative Frequency')
-    else:
-      ax.bar(np.arange(freq.size)-0.4, freq, color='white')
-      if prob != None:
-        tot = np.sum(freq)
-        ax.plot(prob[0], tot*prob[1], 'k-')      
-      ax.set_ylabel('Frequency')
-    ax.set_xlabel(xlabel)
-    ax.set_xlim(-0.5, lnmax)
-    if show_stat:
-      stat = self.calcStat(freq)
-      ax.text(0.6, 0.95, 'NSample : ' + str(stat[0]), transform=ax.transAxes)
-      ax.text(0.6, 0.9, 'Av. : ' + str(stat[1]), transform=ax.transAxes)
-      ax.text(0.6, 0.85, 'Var. : ' + str(stat[2]), transform=ax.transAxes)
-      if prob != None:
-        ax.text(0.6, 0.80, 'Ref. Av. : ' + str(prob[2]), transform=ax.transAxes)
-        ax.text(0.6, 0.75, 'Ref. Var. : ' + str(prob[3]), transform=ax.transAxes)      
-    self.canvas.draw()    
-
-  def drawImage(self, img):
-    self.figure.clf()
-    ax = self.figure.add_subplot(1,1,1)
-    ax.imshow(img)
-    self.canvas.draw()
-
-  def clearGraph(self):
-    self.figure.clf()
-    self.canvas.draw()
-      
-  def saveGraph(self, fname):
-    self.figure.savefig(fname)
-
-  @staticmethod
-  def unitText(unit):
-    if unit == 'um':
-      return '$\mu$m'
-    else:
-      return unit
-
-  @staticmethod
-  def rFreq(freq):
-    tot = np.sum(freq)
-    return np.array(freq, dtype=np.float)/tot
-
-  @staticmethod
-  def calcStat(freq, step=None):
-    tot = np.sum(freq)
-    rf = np.array(freq, dtype=np.float)/tot
-    if step == None:
-      length = np.arange(freq.size)
-    else:
-      length = np.arange(freq.size)*step
-    ave = np.sum(length*rf)
-    var = np.sum(np.power(length-ave, 2)*rf)
-    std = m.sqrt(var)
-    return [tot, ave, var, std]
+def BinaryImage(info):
+  org_img = cv2.imread(info['FileName'], 1)
+  roi_img = FileWidget.Process(org_img, info)
+  cont_img = ContrastWidget.Process(roi_img, info)
+  filter_img = FilterWidget.Process(cont_img, info)
+  thresh_img = ThresholdWidget.Process(filter_img, info)
+  morphol_img = MorphologyWidget.Process(thresh_img, info)
+  mod_img = ModifyWidget.ProcessMod(morphol_img, info)
+  return mod_img
 
 """
 Measure IMFP Thread
 """
 class MeasureIMFPThread(QtCore.QThread):
-  Progress = QtCore.pyqtSignal(int, str)  
+  Progress = QtCore.pyqtSignal(int, str, list)  
   
   def __init__(self, parent=None):   
     super(MeasureIMFPThread, self).__init__(parent)
-    self.mutex = QtCore.QMutex()
     self.barrier = 255
+    self.dpix = None
     self.nsample = 0
     self.seed = 0
     self.freq = None
+    self.stat = None
+    self.psmax = None
     self.image_info = None
 
-  def setup(self, barrier, nsample, seed, image_info, freq):
+  def setup(self, barrier, nsample, pixmax, seed, image_info):
+    self.image_info = []
+    self.psmax = [0.0, 'pixel']
+    for info in image_info:
+      if info['FileMeasure']:
+        self.image_info.append(info)
+        ps = FileWidget.PixelSize(info)
+        if ps[0] > self.psmax[0]:
+          self.psmax = ps
     self.barrier = barrier
     self.nsample = nsample
+    self.freq = np.zeros((2, pixmax), dtype=np.uint32)
     self.seed = seed
-    self.image_info = image_info
-    self.freq = freq
 
   def run(self):
     inc = 100/len(self.image_info)
     for info in self.image_info:
       fname = info['FileName']
-      org_img = cv2.imread(fname, 1)
-      roi_img = FileWidget.Process(org_img, info)
-      filter_img = FilterWidget.Process(roi_img, info)
-      thresh_img = ThresholdWidget.Process(filter_img, info)
-      morphol_img = MorphologyWidget.Process(thresh_img, info)
-      mod_img = ModifyWidget.ProcessMod(morphol_img, info)
-      #cv2.imshow('IMFP measure', mod_img)
-      #cv2.waitKey(0)
-      #cv2.destroyAllWindows()
-      MPImfp.measure(mod_img, self.barrier, self.freq[0], 1.0, self.nsample, self.seed, 0)
-      self.seed = MPImfp.measure(mod_img, self.barrier, self.freq[1], 1.0, self.nsample, self.seed, 1)
+      ps = FileWidget.PixelSize(info)
       filename = QtCore.QFileInfo(fname).fileName()
-      self.Progress.emit(inc, filename)
+      bimg = BinaryImage(info)
+      dpix = self.psmax[0]/ps[0]
+      MPImfp.measure(bimg, self.barrier, self.freq[0], dpix, self.nsample, self.seed, 0)
+      self.seed = MPImfp.measure(bimg, self.barrier, self.freq[1], dpix, self.nsample, self.seed, 1)
+      self.Progress.emit(inc, filename, ps)
+    self.stat = [self.Statistics(self.freq[0], self.psmax),\
+                 self.Statistics(self.freq[1], self.psmax)]
     self.finished.emit()
+
+  @staticmethod
+  def RelativeFrequency(freq):
+    return np.array(freq, dtype=np.float)/np.sum(freq)
+
+  @staticmethod
+  def Statistics(freq, ps):
+    tot = np.sum(freq)
+    rfreq = np.array(freq, dtype=np.float)/tot
+    length = np.arange(len(freq))*ps[0]
+    ave = np.sum(length*rfreq)
+    var = np.sum(np.power(length-ave, 2)*rfreq)
+    std = m.sqrt(var)
+    return [tot, ave, std]
 
 """
 IMFP Dialog
@@ -974,17 +1080,20 @@ class IMFPDialog(QtGui.QDialog):
     self.parent = parent
     self.insitu = True
     self.freq = None
+    self.stat = None
+    self.psmax = None
     self.measure = MeasureIMFPThread()
     self.measure.finished.connect(self.measureFinish)
     self.measure.Progress.connect(self.measureProgress)
+    self.pdlg = QtGui.QProgressDialog(self)
+    self.pdlg.setWindowTitle("Measuring IMFP ...")
+    self.pdlg.canceled.connect(self.measureCancel)
     hbox = QtGui.QHBoxLayout(self)
     vbox = QtGui.QVBoxLayout()
     hbox.addLayout(vbox)
-    self.viewer = GraphicsView()
-    self.viewer.setFixedSize(642, 482)
-    self.scene = GraphScene()
-    self.viewer.setScene(self.scene)
-    hbox.addWidget(self.viewer)
+    self.figure = Figure()
+    self.canvas = FigureCanvas(self.figure)
+    hbox.addWidget(self.canvas)
     vbox.addWidget(QtGui.QLabel('Barrier :'))
     self.combo0 = QtGui.QComboBox()
     self.combo0.addItem('White')  
@@ -996,7 +1105,7 @@ class IMFPDialog(QtGui.QDialog):
     self.spin1.setMaximum(1000)
     self.spin1.setValue(100)      
     vbox.addWidget(self.spin1)
-    vbox.addWidget(QtGui.QLabel('Pixel Max :'))
+    vbox.addWidget(QtGui.QLabel('NClass :'))
     self.spin2 = QtGui.QSpinBox()
     self.spin2.setMinimum(100)
     self.spin2.setMaximum(10000)
@@ -1010,19 +1119,22 @@ class IMFPDialog(QtGui.QDialog):
     self.button1 = QtGui.QPushButton('Measure')
     self.button1.clicked[bool].connect(self.measureIMFP)
     vbox.addWidget(self.button1)
-    self.pbar1 = QtGui.QProgressBar()
-    self.pbar1.setRange(0,100)
-    self.pbar1.setValue(0)
-    vbox.addWidget(self.pbar1)
-    self.list1 = QtGui.QListWidget()
-    vbox.addWidget(self.list1)
+    self.treeview = QtGui.QTreeView()
+    self.treemodel = QtGui.QStandardItemModel()
+    self.treemodel.setHorizontalHeaderLabels(['Files', 'PS', 'Unit'])
+    self.treeview.setModel(self.treemodel)
+    self.treeview.header().setStretchLastSection(False)
+    self.treeview.header().setResizeMode(0, QtGui.QHeaderView.Stretch)
+    self.treeview.header().setResizeMode(1, QtGui.QHeaderView.ResizeToContents)
+    self.treeview.header().setResizeMode(2, QtGui.QHeaderView.ResizeToContents)
+    vbox.addWidget(self.treeview)
     vbox.addWidget(QtGui.QLabel('Type :'))
     self.combo1 = QtGui.QComboBox()
     self.combo1.addItem('Single')  
     self.combo1.addItem('Double')
     self.combo1.currentIndexChanged.connect(self.drawGraph)
     vbox.addWidget(self.combo1)
-    vbox.addWidget(QtGui.QLabel('Plot Pixel Max :'))
+    vbox.addWidget(QtGui.QLabel('Plot NClass :'))
     self.spin3 = QtGui.QSpinBox()
     self.spin3.setMinimum(10)
     self.spin3.setMaximum(10000)
@@ -1053,45 +1165,30 @@ class IMFPDialog(QtGui.QDialog):
   def setInfo(self, info):
     self.combo0.setCurrentIndex(info['Barrier'])
     self.spin1.setValue(info['NSample'])    
-    self.spin2.setValue(info['PixelMax'])
+    self.spin2.setValue(info['NClass'])
     self.line1.setText(info['Seed'])
     self.insitu = False
     self.combo1.setCurrentIndex(info['Type'])
-    self.spin3.setValue(info['PlotPixelMax'])
+    self.spin3.setValue(info['PlotClassMax'])
     self.check1.setChecked(info['RelativeFrequency'])
     self.check2.setChecked(info['ShowStatistics'])
     self.insitu = True
-    self.list1.clear()
-    for it in info['List']:    
-      self.list1.addItem(it)
-    if info['Freq'] != None:
-      self.freq = np.array(info['Freq'], dtype=np.uint32)
-    else:
-      self.freq = None
-    self.drawGraph()
+    self.treemodel.removeRows(0, self.treemodel.rowCount())
 
   def getInfo(self):
     info = {}
     info['Barrier'] = self.combo0.currentIndex()
     info['NSample'] = self.spin1.value()
-    info['PixelMax'] = self.spin2.value()
+    info['NClass'] = self.spin2.value()
     info['Seed'] = str(self.line1.text())
     info['Type'] = self.combo1.currentIndex()
-    info['PlotPixelMax'] = self.spin3.value()
+    info['PlotClassMax'] = self.spin3.value()
     info['RelativeFrequency'] = self.check1.isChecked()
     info['ShowStatistics'] = self.check2.isChecked()
-    lis = []
-    for i in range(self.list1.count()):    
-      lis.append(str(self.list1.item(i).text()))
-    info['List'] = lis
-    if self.freq != None:
-      info['Freq'] = self.freq.tolist()
-    else:
-      info['Freq'] = None  
     return info
 
   def measureIMFP(self):
-    if self.parent.image_index >= 0:
+    if len(self.parent.image_info) > 0:
       if self.combo0.currentIndex() == 1:
         barrier = 0
       else:
@@ -1099,106 +1196,137 @@ class IMFPDialog(QtGui.QDialog):
       nsample = self.spin1.value() * 10000
       pixmax = self.spin2.value()
       seed = long(self.line1.text())
-      self.freq = np.zeros((2, pixmax), dtype=np.uint32)
-      self.list1.clear()
-      self.button1.setEnabled(False) 
-      self.button2.setEnabled(False)  
-      self.button3.setEnabled(False)  
-      self.button4.setEnabled(False)
-      self.combo1.setEnabled(False)
-      self.spin3.setEnabled(False)
-      self.check1.setEnabled(False)
-      self.check2.setEnabled(False)
-      self.pbar1.setValue(0)
-      self.measure.setup(barrier, nsample, seed, self.parent.image_info, self.freq)        
+      self.clearFreq()
+      self.pdlg.setValue(0)
+      self.pdlg.open()
+      self.measure.setup(barrier, nsample, pixmax, seed, self.parent.image_info)        
       self.measure.start()
 
-  def measureProgress(self, inc, filename):
-    val = self.pbar1.value()
-    self.pbar1.setValue(val+inc)
-    self.list1.addItem(filename)
+  def measureProgress(self, inc, filename, ps):
+    val = self.pdlg.value()
+    self.pdlg.setValue(val+inc)
+    root = self.treemodel.invisibleRootItem()
+    item1 = QtGui.QStandardItem(filename)
+    item1.setEditable(False)
+    item2 = QtGui.QStandardItem('%.3f' % ps[0])
+    item2.setEditable(False)
+    item3 = QtGui.QStandardItem(ps[1])
+    item3.setEditable(False)
+    root.appendRow([item1, item2, item3])
 
   def measureFinish(self):
-    self.button1.setEnabled(True) 
-    self.button2.setEnabled(True)     
-    self.button3.setEnabled(True) 
-    self.button4.setEnabled(True)
-    self.combo1.setEnabled(True)
-    self.spin3.setEnabled(True)
-    self.check1.setEnabled(True)
-    self.check2.setEnabled(True)
-    self.pbar1.setValue(100)
-    self.drawGraph()
+    self.pdlg.hide()
+    if self.measure.freq is not None and self.measure.stat is not None:
+      self.freq = self.measure.freq
+      self.stat = self.measure.stat
+      self.psmax = self.measure.psmax
+      self.drawGraph()
+
+  def measureCancel(self):
+    self.measure.terminate()
+
+  def drawIMFP(self, freq, pixmax, dsize, xlabel, ylabel, stat):
+    self.figure.clf()
+    ax = self.figure.add_subplot(1,1,1)
+    length = np.arange(freq.size)*dsize
+    ax.plot(length, freq, 'k-')
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_xlim(0, pixmax*dsize)
+    if stat is not None:
+      ax.text(0.6, 0.95, 'NSample : ' + str(stat[0]), transform=ax.transAxes)
+      ax.text(0.6, 0.9, 'Mean : ' + str(stat[1]), transform=ax.transAxes) 
+      ax.text(0.6, 0.85, 'STD : ' + str(stat[2]), transform=ax.transAxes)
+    self.canvas.draw()
 
   def drawGraph(self):
     if self.freq is None or self.insitu == False:
       return
-    ps = self.parent.pixelsize.data['PS']
-    unit = self.parent.pixelsize.data['UNIT']
     if self.combo1.currentIndex() == 0:
-      xlabel = 'Single length (' + self.scene.unitText(unit) + ')'
-      self.scene.drawIMFP(self.freq[0], xlabel, ps, self.spin3.value(),\
-        self.check1.isChecked(), self.check2.isChecked())
+      find = 0
+      xlabel = 'Single length (%s)' % PlotUnitText(self.psmax[1])
     elif self.combo1.currentIndex() == 1:
-      xlabel = 'Double length (' + self.scene.unitText(unit) + ')'
-      self.scene.drawIMFP(self.freq[1], xlabel, ps, self.spin3.value(),\
-        self.check1.isChecked(), self.check2.isChecked())
+      find = 1
+      xlabel = 'Double length (%s)' % PlotUnitText(self.psmax[1])
+    if self.check1.isChecked():
+      freq = MeasureIMFPThread.RelativeFrequency(self.freq[find])
+      ylabel = 'Relative Frequency'
+    else:
+      freq = self.freq[find]
+      ylabel = 'Frequency'
+    if self.check2.isChecked():
+      stat = self.stat[find]
+    else:
+      stat = None
+    pixmax = self.spin3.value()
+    self.drawIMFP(freq, pixmax, self.psmax[0], xlabel, ylabel, stat)
 
-  def showEvent(self, event):
-    self.drawGraph()
-
-  def saveCSV(self):    
+  def saveCSV(self):
+    if self.freq is None:
+      return
     fname = QtGui.QFileDialog.getSaveFileName(self, 'Save CSV', filter='CSV Files (*.csv);;All Files (*.*)')
     if fname:
-      fout = open(fname, 'w')  
-      fout.write('Images,' + str(self.list1.count()) + '\n')
-      for i in range(self.list1.count()):
-        fout.write(self.list1.item(i).text() + '\n')
-      psdata = self.parent.pixelsize.data
-      fout.write('PixelSize,' + str(psdata['PS']) + ',' + psdata['UNIT'] + '\n')
-      fout.write('Pixmax,' + str(len(self.freq[0])) + '\n')
+      fout = open(fname, 'w')
+      nimg = self.treemodel.rowCount()
+      fout.write('Images,' + str(nimg) + '\n')      
+      fout.write('ImageID, FileName, PixelSize, Unit\n')
+      for i in range(nimg):
+        fname = self.treemodel.item(i,0).text()
+        ps = self.treemodel.item(i,1).text()
+        unit = self.treemodel.item(i,2).text()
+        fout.write('%d, %s, %s, %s\n' % (i, fname, ps, unit))
       fout.write('Statistics, Total, Mean, STD\n')
-      stat0 = self.scene.calcStat(self.freq[0], step=psdata['PS'])
-      fout.write('Single' + ',' + str(stat0[0]) + ',' + str(stat0[1]) + ',' + str(stat0[3]) + '\n')
-      stat1 = self.scene.calcStat(self.freq[1], step=psdata['PS'])
-      fout.write('Double' + ',' + str(stat1[0]) + ',' + str(stat1[1]) + ',' + str(stat1[3]) + '\n')
-      fout.write('Pixel, Length, SingleF, SingleRF, DoubleF, DoubleRF\n')
-      rf0 = np.array(self.freq[0], dtype=np.float) / stat0[0]
-      rf1 = np.array(self.freq[1], dtype=np.float) / stat1[0]
-      for i in range(len(self.freq[0])):
-        fout.write(str(i) + ',' + str(i*psdata['PS']) + ',' + str(self.freq[0,i]) + ',' + str(rf0[i]) + ','\
-          + str(self.freq[1,i]) + ',' + str(rf1[i]) + '\n')
+      tt = ['Single', 'Double']
+      c = 0 
+      for st in self.stat:
+        fout.write('%s, %d, %f, %f\n' % (tt[c], st[0], st[1], st[2]))
+        c += 1
+      fout.write('Class, Length, SingleF, SingleRF, DoubleF, DoubleRF\n')
+      f0 = self.freq[0]
+      f1 = self.freq[1]
+      rf0 = MeasureIMFPThread.RelativeFrequency(f0)
+      rf1 = MeasureIMFPThread.RelativeFrequency(f1)
+      for i in range(len(f0)):
+        length = i*self.psmax[0]
+        fout.write('%d, %f, %d, %f, %d, %f\n' % (i, length, f0[i], rf0[i], f1[i], rf1[i]))
 
   def saveGraph(self):
+    if self.freq is None:
+      return
     fname = QtGui.QFileDialog.getSaveFileName(self, 'Save Graph', filter='Image Files (*.png *.pdf *.svg);;All Files (*.*)')
     if fname:
-      self.scene.saveGraph(str(fname))    
+      self.figure.savefig(str(fname))    
 
   def clearFreq(self):
     self.freq = None
-    self.pbar1.setValue(0)
-    self.list1.clear()
-    self.scene.clearGraph()
+    self.stat = None
+    self.psmax = None
+    self.treemodel.removeRows(0, self.treemodel.rowCount())
+    self.figure.clf()
+    self.canvas.draw()
 
 """
 Measure LN2D Thread
 """
 class MeasureLN2DThread(QtCore.QThread):
-  Progress = QtCore.pyqtSignal(int, str)  
+  Progress = QtCore.pyqtSignal(int, str, list)  
   
   def __init__(self, parent=None):   
     super(MeasureLN2DThread, self).__init__(parent)
-    self.mutex = QtCore.QMutex()
     self.nsample = 0
     self.freq = None
     self.image_info = None
     self.ln2d = None
     self.af = 0
+    self.stat = None
 
-  def setup(self, nsample, seed, image_info, freq):
+  def setup(self, nsample, lnmax, seed, image_info):
+    self.image_info = []
+    for info in image_info:
+      if info['FileMeasure']:
+        self.image_info.append(info)
     self.nsample = nsample
-    self.image_info = image_info
-    self.freq = freq
+    self.freq = np.zeros((2, lnmax), dtype=np.uint32)
     self.ln2d = MPLn23d.ln2d_new(len(self.image_info))
     self.ln2d.seed = seed
 
@@ -1206,31 +1334,45 @@ class MeasureLN2DThread(QtCore.QThread):
     inc = 100/len(self.image_info)
     for info in self.image_info:
       fname = info['FileName']
-      org_img = cv2.imread(fname, 1)
-      roi_img = FileWidget.Process(org_img, info)
-      filter_img = FilterWidget.Process(roi_img, info)
-      thresh_img = ThresholdWidget.Process(filter_img, info)
-      morphol_img = MorphologyWidget.Process(thresh_img, info)
-      mod_img = ModifyWidget.ProcessMod(morphol_img, info)      
-      #cv2.imshow('IMFP measure', mod_img)
-      #cv2.waitKey(0)
-      #cv2.destroyAllWindows()
-      conts, hier = cv2.findContours(mod_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-      sid = self.ln2d.add_sec(len(conts), mod_img.shape[1], mod_img.shape[0])
-      for cont in conts:
-        mom = cv2.moments(cont)
-        if mom['m00'] != 0:
-          x = mom['m10']/mom['m00']
-          y = mom['m01']/mom['m00']
-          area = cv2.contourArea(cont)
-          r = m.sqrt(area/m.pi)
-          self.ln2d.add_gc(sid, x, y, r)
+      ps = FileWidget.PixelSize(info)
       filename = QtCore.QFileInfo(fname).fileName()
-      self.Progress.emit(inc, filename)
+      img = BinaryImage(info)
+      conts, hier = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+      self.AddSec(self.ln2d, img, conts, ps)
+      self.Progress.emit(inc, filename, ps)
     self.ln2d.measure_gc(self.freq[0])
     self.ln2d.measure_random(self.freq[1], self.nsample)
     self.af = self.ln2d.area_fraction()
+    self.stat = [self.Statistics(self.freq[0]), self.Statistics(self.freq[1])]
     self.finished.emit()
+
+  @staticmethod
+  def AddSec(ln2d, img, conts, ps):
+    sx = img.shape[1]*ps[0]
+    sy = img.shape[0]*ps[0]
+    sid = ln2d.add_sec(len(conts), sx, sy)
+    for cont in conts:
+      mom = cv2.moments(cont)
+      if mom['m00'] != 0:
+        x = mom['m10']/mom['m00']*ps[0]
+        y = mom['m01']/mom['m00']*ps[0]
+        area = cv2.contourArea(cont)
+        r = m.sqrt(area/m.pi)*ps[0]
+        ln2d.add_gc(sid, x, y, r)
+    return sid
+
+  @staticmethod
+  def RelativeFrequency(freq):
+    return np.array(freq, dtype=np.float)/np.sum(freq)
+
+  @staticmethod
+  def Statistics(freq):
+    tot = np.sum(freq)
+    rfreq = np.array(freq, dtype=np.float)/tot
+    length = np.arange(len(freq))
+    ave = np.sum(length*rfreq)
+    var = np.sum(np.power(length-ave, 2)*rfreq)
+    return [tot, ave, var]
 
 """
 LN2D Dialog
@@ -1242,17 +1384,19 @@ class LN2DDialog(QtGui.QDialog):
     self.parent = parent
     self.insitu = True
     self.freq = None
+    self.stat = None
     self.measure = MeasureLN2DThread()
     self.measure.finished.connect(self.measureFinish)
     self.measure.Progress.connect(self.measureProgress)
+    self.pdlg = QtGui.QProgressDialog(self)
+    self.pdlg.setWindowTitle("Measuring LN2D ...")
+    self.pdlg.canceled.connect(self.measureCancel)
     hbox = QtGui.QHBoxLayout(self)
     vbox = QtGui.QVBoxLayout()
     hbox.addLayout(vbox)
-    self.viewer = GraphicsView()
-    self.viewer.setFixedSize(642, 482)
-    self.scene = GraphScene()
-    self.viewer.setScene(self.scene)
-    hbox.addWidget(self.viewer)
+    self.figure = Figure()
+    self.canvas = FigureCanvas(self.figure)
+    hbox.addWidget(self.canvas)
     vbox.addWidget(QtGui.QLabel('NSample (x10000) :'))
     self.spin1 = QtGui.QSpinBox()
     self.spin1.setMinimum(1)
@@ -1273,12 +1417,15 @@ class LN2DDialog(QtGui.QDialog):
     self.button1 = QtGui.QPushButton('Measure')
     self.button1.clicked[bool].connect(self.measureLN2D)
     vbox.addWidget(self.button1)
-    self.pbar1 = QtGui.QProgressBar()
-    self.pbar1.setRange(0,100)
-    self.pbar1.setValue(0)
-    vbox.addWidget(self.pbar1)
-    self.list1 = QtGui.QListWidget()
-    vbox.addWidget(self.list1)
+    self.treeview = QtGui.QTreeView()
+    self.treemodel = QtGui.QStandardItemModel()
+    self.treemodel.setHorizontalHeaderLabels(['Files', 'PS', 'Unit'])
+    self.treeview.setModel(self.treemodel)
+    self.treeview.header().setStretchLastSection(False)
+    self.treeview.header().setResizeMode(0, QtGui.QHeaderView.Stretch)
+    self.treeview.header().setResizeMode(1, QtGui.QHeaderView.ResizeToContents)
+    self.treeview.header().setResizeMode(2, QtGui.QHeaderView.ResizeToContents)
+    vbox.addWidget(self.treeview)
     vbox.addWidget(QtGui.QLabel('Type :'))
     self.combo1 = QtGui.QComboBox()
     self.combo1.addItem('Gravity center')  
@@ -1336,14 +1483,7 @@ class LN2DDialog(QtGui.QDialog):
     self.check2.setChecked(info['ShowStatistics'])
     self.check3.setChecked(info['ShowReference'])
     self.insitu = True
-    self.list1.clear()
-    for it in info['List']:    
-      self.list1.addItem(it)
-    if info['Freq'] != None:
-      self.freq = np.array(info['Freq'], dtype=np.uint32)
-    else:
-      self.freq = None
-    self.drawGraph()
+    self.treemodel.removeRows(0, self.treemodel.rowCount())
 
   def getInfo(self):
     info = {}
@@ -1356,74 +1496,86 @@ class LN2DDialog(QtGui.QDialog):
     info['RelativeFrequency'] = self.check1.isChecked()
     info['ShowStatistics'] = self.check2.isChecked()
     info['ShowReference'] = self.check3.isChecked()
-    lis = []
-    for i in range(self.list1.count()):    
-      lis.append(str(self.list1.item(i).text()))
-    info['List'] = lis
-    if self.freq != None:
-      info['Freq'] = self.freq.tolist()
-    else:
-      info['Freq'] = None  
     return info
 
   def measureLN2D(self):
-    if self.parent.image_index >= 0:
+    if len(self.parent.image_info) > 0:
       nsample = self.spin1.value() * 10000
       lnmax = self.spin2.value()
       seed = long(self.line1.text())
-      self.freq = np.zeros((2, lnmax), dtype=np.uint32)
-      self.list1.clear()
-      self.button1.setEnabled(False) 
-      self.button2.setEnabled(False)  
-      self.button3.setEnabled(False)  
-      self.button4.setEnabled(False)
-      self.combo1.setEnabled(False)
-      self.spin3.setEnabled(False)
-      self.spin4.setEnabled(False)
-      self.check1.setEnabled(False)
-      self.check2.setEnabled(False)
-      self.check3.setEnabled(False)
-      self.pbar1.setValue(0)
-      self.measure.setup(nsample, seed, self.parent.image_info, self.freq)        
+      self.clearFreq()
+      self.pdlg.setValue(0)
+      self.pdlg.open()
+      self.measure.setup(nsample, lnmax, seed, self.parent.image_info)        
       self.measure.start()
 
-  def measureProgress(self, inc, filename):
-    val = self.pbar1.value()
-    self.pbar1.setValue(val+inc)
-    self.list1.addItem(filename)
+  def measureProgress(self, inc, filename, ps):
+    val = self.pdlg.value()
+    self.pdlg.setValue(val+inc)
+    root = self.treemodel.invisibleRootItem()
+    item1 = QtGui.QStandardItem(filename)
+    item1.setEditable(False)
+    item2 = QtGui.QStandardItem('%.3f' % ps[0])
+    item2.setEditable(False)
+    item3 = QtGui.QStandardItem(ps[1])
+    item3.setEditable(False)
+    root.appendRow([item1, item2, item3])
 
   def measureFinish(self):
-    self.button1.setEnabled(True) 
-    self.button2.setEnabled(True)     
-    self.button3.setEnabled(True) 
-    self.button4.setEnabled(True)
-    self.combo1.setEnabled(True)
-    self.spin3.setEnabled(True)
-    self.spin4.setEnabled(True)
-    self.check1.setEnabled(True)
-    self.check2.setEnabled(True)
-    self.check3.setEnabled(True)
-    self.pbar1.setValue(100)
-    self.spin4.setValue(int(self.measure.af*100.0))
-    self.drawGraph()
+    self.pdlg.hide()
+    if self.measure.freq is not None and self.measure.stat is not None:
+      self.freq = self.measure.freq
+      self.stat = self.measure.stat
+      self.spin4.setValue(int(self.measure.af*100.0))
+      self.drawGraph()
+
+  def measureCancel(self):
+    self.measure.terminate()
+
+  def drawLN2D(self, freq, lnmax, xlabel, ylabel, stat, prob):
+    self.figure.clf()
+    ax = self.figure.add_subplot(1,1,1)
+    ax.bar(np.arange(freq.size)-0.4, freq, color='white')
+    if prob != None:
+      ax.plot(prob[0], prob[1], 'k-')
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_xlim(-0.5, lnmax)
+    if stat is not None:
+      ax.text(0.6, 0.95, 'NSample : ' + str(stat[0]), transform=ax.transAxes)
+      ax.text(0.6, 0.9, 'Av. : ' + str(stat[1]), transform=ax.transAxes)
+      ax.text(0.6, 0.85, 'Var. : ' + str(stat[2]), transform=ax.transAxes)
+      if prob != None:
+        ax.text(0.6, 0.80, 'Ref. Av. : ' + str(prob[2]), transform=ax.transAxes)
+        ax.text(0.6, 0.75, 'Ref. Var. : ' + str(prob[3]), transform=ax.transAxes)      
+    self.canvas.draw()
 
   def drawGraph(self):
     if self.freq is None or self.insitu == False:
       return
     if self.combo1.currentIndex() == 0:
-      if self.check3.isChecked():
-        prob = self.ln2d_prob(0.01*self.spin4.value())
-      else:
-        prob = None    
-      self.scene.drawLN2D(self.freq[0], 'LN2D', self.spin3.value(),\
-        self.check1.isChecked(), self.check2.isChecked(), prob)
+      find = 0
+      xlabel = 'LN2D'
+      prob = self.ln2d_prob(0.01*self.spin4.value())
     elif self.combo1.currentIndex() == 1:
-      if self.check3.isChecked():
-        prob = self.ln2dr_prob(0.01*self.spin4.value())
-      else:
-        prob = None
-      self.scene.drawLN2D(self.freq[1], 'LN2DR', self.spin3.value(),\
-        self.check1.isChecked(), self.check2.isChecked(), prob)
+      find = 1
+      xlabel = 'LN2DR'
+      prob = self.ln2dr_prob(0.01*self.spin4.value())
+    if self.check1.isChecked():
+      freq = self.measure.RelativeFrequency(self.freq[find])
+      ylabel = 'Relative Frequency'
+    else:
+      freq = self.freq[find]
+      prob[1] = prob[1]*np.sum(freq)
+      ylabel = 'Frequency'
+    if self.check2.isChecked():
+      stat = self.stat[find]
+    else:
+      stat = None
+    if self.check3.isChecked() is not True:
+      prob = None
+    lnmax = self.spin3.value()
+    self.drawLN2D(freq, lnmax, xlabel, ylabel, stat, prob)
 
   def poisson_prob(self, a, b):
     x = np.arange(b-1+0.1, 100, 0.1)
@@ -1443,41 +1595,164 @@ class LN2DDialog(QtGui.QDialog):
     a = p * (m.exp(-q * af) - 1) + 7
     b = p * (1 - m.exp(-q * af))    
     return self.poisson_prob(a, b)
-    
-  def showEvent(self, event):
-    self.drawGraph()
 
   def saveCSV(self):    
     fname = QtGui.QFileDialog.getSaveFileName(self, 'Save CSV', filter='CSV Files (*.csv);;All Files (*.*)')
     if fname:
-      fout = open(fname, 'w')  
-      fout.write('Images,' + str(self.list1.count()) + '\n')
-      for i in range(self.list1.count()):
-        fout.write(self.list1.item(i).text() + '\n')
-      fout.write('LNMax,' + str(len(self.freq[0])) + '\n')
+      fout = open(fname, 'w')
+      nimg = self.treemodel.rowCount()
+      fout.write('Images,' + str(nimg) + '\n')      
+      fout.write('ImageID, FileName, PixelSize, Unit\n')
+      for i in range(nimg):
+        fname = self.treemodel.item(i,0).text()
+        ps = self.treemodel.item(i,1).text()
+        unit = self.treemodel.item(i,2).text()
+        fout.write('%d, %s, %s, %s\n' % (i, fname, ps, unit))
+
       fout.write('Statistics, Total, Average, Variance\n')
-      stat0 = self.scene.calcStat(self.freq[0])
-      fout.write('GC' + ',' + str(stat0[0]) + ',' + str(stat0[1]) + ',' + str(stat0[2]) + '\n')
-      stat1 = self.scene.calcStat(self.freq[1])
-      fout.write('Random' + ',' + str(stat1[0]) + ',' + str(stat1[1]) + ',' + str(stat1[2]) + '\n')
+      tt = ['GC', 'Random']
+      c = 0 
+      for st in self.stat:
+        fout.write('%s, %d, %f, %f\n' % (tt[c], st[0], st[1], st[2]))
+        c += 1
       fout.write('LN, GC, GCRF, Random, RandomRF\n')
-      rf0 = np.array(self.freq[0], dtype=np.float) / stat0[0]
-      rf1 = np.array(self.freq[1], dtype=np.float) / stat1[0]
+      rf0 = self.measure.RelativeFrequency(self.freq[0])
+      rf1 = self.measure.RelativeFrequency(self.freq[1])
       for i in range(len(self.freq[0])):
-        fout.write(str(i) + ',' + str(self.freq[0,i]) + ',' + str(rf0[i]) + ','\
-          + str(self.freq[1,i]) + ',' + str(rf1[i]) + '\n')
+        fout.write('%d, %d, %f, %d, %f\n' % (i, self.freq[0,i], rf0[i], self.freq[1,i], rf1[i]))
 
   def saveGraph(self):
     fname = QtGui.QFileDialog.getSaveFileName(self, 'Save Graph', filter='Image Files (*.png *.pdf *.svg);;All Files (*.*)')
     if fname:
-      self.scene.saveGraph(str(fname))    
+      self.figure.savefig(str(fname))    
 
   def clearFreq(self):
     self.freq = None
-    self.pbar1.setValue(0)
-    self.list1.clear()
-    self.scene.clearGraph()
+    self.stat = None
+    self.treemodel.removeRows(0, self.treemodel.rowCount())
+    self.figure.clf()
+    self.canvas.draw()
+
+"""
+Measure Size Thread
+"""
+class MeasureSizeThread(QtCore.QThread):
+  Progress = QtCore.pyqtSignal(int, str, list)  
+  
+  def __init__(self, parent=None):   
+    super(MeasureSizeThread, self).__init__(parent)
+    self.image_info = None
+    self.data = None
+    self.stat = None
+    self.psmin = None
+    self.afnd = None
+
+  def setup(self, image_info):
+    self.image_info = []
+    for info in image_info:
+      if info['FileMeasure']:
+        self.image_info.append(info)
+
+  def run(self):
+    inc = 100/len(self.image_info)
+    self.data = []
+    imgarea = 0.0
+    self.psmin = [1.0e12, 'pixel']
+    ind = 0
+    for info in self.image_info:
+      fname = info['FileName']
+      filename = QtCore.QFileInfo(fname).fileName()
+      ps = FileWidget.PixelSize(info)
+      img = BinaryImage(info)
+      conts, hier = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+      self.data.extend(self.Measure(conts, ps, ind))
+      if ps[0] < self.psmin[0]:
+        self.psmin = ps
+      imgarea += img.shape[1]*img.shape[0]*ps[0]*ps[0]
+      self.Progress.emit(inc, filename, ps)
+      ind += 1
+    self.stat = self.Statistics(self.data)
+    self.afnd = [self.AreaFraction(self.data, imgarea),\
+                 self.NumberDensity(self.data, imgarea)]
+    self.finished.emit()
+
+  @staticmethod
+  def AreaFraction(data, imgarea):
+    ta = 0.0
+    for dt in data:
+      r = dt[3]/2.0
+      ta += m.pi*r*r
+    return 100.0*ta/imgarea
+
+  @staticmethod
+  def NumberDensity(data, imgarea):
+    return len(data)/imgarea
+
+  @staticmethod
+  def Measure(conts, ps, index):
+    data = []
+    for cont in conts:
+      mom = cv2.moments(cont)
+      if mom['m00'] != 0:
+        x = mom['m10']/mom['m00']*ps[0]
+        y = mom['m01']/mom['m00']*ps[0]
+        area = cv2.contourArea(cont)
+        dia = 2.0*m.sqrt(area/m.pi)*ps[0]
+        pos, size, ang = cv2.minAreaRect(cont)
+        per = cv2.arcLength(cont, True)
+        cir = 4.0*m.pi*area/(per*per)
+        if size[0] >= size[1]:
+          ls = size[0]*ps[0]
+          ns = size[1]*ps[0]
+          asp = size[1]/size[0]
+          ang += 90
+        else:
+          ls = size[1]*ps[0]
+          ns = size[0]*ps[0]
+          asp = size[0]/size[1]
+          ang += 180
+        data.append([index, x, y, dia, ls, ns, asp, cir, ang])
+    return data
+
+  @staticmethod
+  def Statistics(data):
+    dia = np.empty(len(data))
+    ls = np.empty(len(data))
+    ns = np.empty(len(data))
+    asp = np.empty(len(data))
+    cir = np.empty(len(data))
+    ang = np.empty(len(data))
+    for i in range(len(data)):
+      dia[i] = data[i][3]
+      ls[i] = data[i][4]
+      ns[i] = data[i][5]      
+      asp[i] = data[i][6]
+      cir[i] = data[i][7]
+      ang[i] = data[i][8]
+    stat = []
+    stat.append([np.mean(dia), np.std(dia)])
+    stat.append([np.mean(ls), np.std(ls)])
+    stat.append([np.mean(ns), np.std(ns)])
+    stat.append([np.mean(asp), np.std(asp)])
+    stat.append([np.mean(cir), np.std(cir)])
+    stat.append([np.mean(ang), np.std(ang)])
+    return stat
     
+  @staticmethod
+  def Frequency(data, col, nclass, dsize):
+    freq = np.zeros(nclass, dtype=np.uint32)
+    for dat in data:
+      ind = int(dat[col]/dsize)
+      if ind < nclass:
+        freq[ind] += 1
+    return freq
+
+  @staticmethod
+  def RelativeFrequency(data, col, nclass, dsize):
+    freq = MeasureSizeThread.Frequency(data, col, nclass, dsize)
+    rfreq = np.array(freq, dtype=np.float)/np.sum(freq)
+    return rfreq
+
 """
 Size Dialog
 """
@@ -1488,39 +1763,68 @@ class SizeDialog(QtGui.QDialog):
     self.parent = parent
     self.insitu = True
     self.data = None
+    self.stat = None
+    self.psmin = None
+    self.afnd = None
+    self.measure = MeasureSizeThread()
+    self.measure.finished.connect(self.measureFinish)
+    self.measure.Progress.connect(self.measureProgress)
+    self.pdlg = QtGui.QProgressDialog(self)
+    self.pdlg.setWindowTitle("Measuring Size ...")
+    self.pdlg.canceled.connect(self.measureCancel)
     hbox = QtGui.QHBoxLayout(self)
     vbox = QtGui.QVBoxLayout()
     hbox.addLayout(vbox)
-    self.viewer = GraphicsView()
-    self.viewer.setFixedSize(642, 482)
-    self.scene = GraphScene()
-    self.viewer.setScene(self.scene)
-    hbox.addWidget(self.viewer)
+    self.figure = Figure()
+    self.canvas = FigureCanvas(self.figure)
+    hbox.addWidget(self.canvas)
     self.button1 = QtGui.QPushButton('Measure')
     self.button1.clicked[bool].connect(self.measureSize)
     vbox.addWidget(self.button1)
-    self.list1 = QtGui.QListWidget()
-    vbox.addWidget(self.list1)
+    self.treeview = QtGui.QTreeView()
+    self.treemodel = QtGui.QStandardItemModel()
+    self.treemodel.setHorizontalHeaderLabels(['Files', 'PS', 'Unit'])
+    self.treeview.setModel(self.treemodel)
+    self.treeview.header().setStretchLastSection(False)
+    self.treeview.header().setResizeMode(0, QtGui.QHeaderView.Stretch)
+    self.treeview.header().setResizeMode(1, QtGui.QHeaderView.ResizeToContents)
+    self.treeview.header().setResizeMode(2, QtGui.QHeaderView.ResizeToContents)
+    vbox.addWidget(self.treeview)
+    self.labelaf = QtGui.QLabel('AF :')
+    vbox.addWidget(self.labelaf)
+    self.labelnd = QtGui.QLabel('ND :')
+    vbox.addWidget(self.labelnd)
     vbox.addWidget(QtGui.QLabel('Type :'))
     self.combo1 = QtGui.QComboBox()
     self.combo1.addItem('Diameter')
     self.combo1.addItem('Long side')    
     self.combo1.addItem('Narrow side')
     self.combo1.addItem('Aspect ratio')
+    self.combo1.addItem('Circularity')
     self.combo1.addItem('Angle')
     self.combo1.currentIndexChanged.connect(self.drawGraph)
     vbox.addWidget(self.combo1)
-    vbox.addWidget(QtGui.QLabel('Bins :'))
+    vbox.addWidget(QtGui.QLabel('NClass :'))
     self.spin1 = QtGui.QSpinBox()
     self.spin1.setMinimum(1)
     self.spin1.setMaximum(500)
-    self.spin1.setValue(30)
+    self.spin1.setValue(100)
     self.spin1.valueChanged.connect(self.drawGraph)
     vbox.addWidget(self.spin1)
-    self.check1 = QtGui.QCheckBox('Show Statistics')
+    vbox.addWidget(QtGui.QLabel('DSize :'))
+    self.line1 = QtGui.QLineEdit()
+    self.line1.setValidator(QtGui.QDoubleValidator())
+    self.line1.textChanged[str].connect(self.drawGraph)
+    self.line1.setText('1.0')
+    vbox.addWidget(self.line1)
+    self.check1 = QtGui.QCheckBox('Relative Frequency')
     self.check1.setChecked(True)
     self.check1.stateChanged[int].connect(self.drawGraph)
     vbox.addWidget(self.check1)
+    self.check2 = QtGui.QCheckBox('Show Statistics')
+    self.check2.setChecked(True)
+    self.check2.stateChanged[int].connect(self.drawGraph)
+    vbox.addWidget(self.check2)
     vbox.addStretch()    
     hbox1 = QtGui.QHBoxLayout()
     vbox.addLayout(hbox1)
@@ -1537,197 +1841,288 @@ class SizeDialog(QtGui.QDialog):
   def setInfo(self, info):
     self.insitu = False
     self.combo1.setCurrentIndex(info['Type'])
-    self.spin1.setValue(info['Bins'])
-    self.check1.setChecked(info['ShowStatistics'])
+    self.spin1.setValue(info['NClass'])
+    self.line1.setText(info['DSize'])
+    self.check1.setChecked(info['RelativeFrequency'])
+    self.check2.setChecked(info['ShowStatistics'])
     self.insitu = True
-    self.list1.clear()
-    for it in info['List']:    
-      self.list1.addItem(it)
-    if info['Data'] != None:
-      self.data = info['Data']
-    else:
-      self.data = None
-    self.drawGraph()
+    self.treemodel.removeRows(0, self.treemodel.rowCount())
 
   def getInfo(self):
     info = {}
     info['Type'] = self.combo1.currentIndex()
-    info['Bins'] = self.spin1.value()
-    info['ShowStatistics'] = self.check1.isChecked()
-    lis = []
-    for i in range(self.list1.count()):    
-      lis.append(str(self.list1.item(i).text()))
-    info['List'] = lis
-    if self.data != None:
-      info['Data'] = self.data
-    else:
-      info['Data'] = None  
+    info['NClass'] = self.spin1.value()
+    info['DSize'] = str(self.line1.text())
+    info['RelativeFrequency'] = self.check1.isChecked()
+    info['ShowStatistics'] = self.check2.isChecked()
     return info
 
   def measureSize(self):
-    if self.parent.image_index < 0:
-      return
-    self.data = []
-    self.list1.clear()
-    for info in self.parent.image_info:
-      fname = info['FileName']
-      org_img = cv2.imread(fname, 1)
-      roi_img = FileWidget.Process(org_img, info)
-      filter_img = FilterWidget.Process(roi_img, info)
-      thresh_img = ThresholdWidget.Process(filter_img, info)
-      morphol_img = MorphologyWidget.Process(thresh_img, info)
-      mod_img = ModifyWidget.ProcessMod(morphol_img, info)
-      conts, hier = cv2.findContours(mod_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-      filename = QtCore.QFileInfo(fname).fileName()
-      self.list1.addItem(filename)
-      for cont in conts:
-        mom = cv2.moments(cont)
-        if mom['m00'] != 0:
-          x = int(mom['m10']/mom['m00'])
-          y = int(mom['m01']/mom['m00'])
-          area = cv2.contourArea(cont)
-          dia = 2.0 * m.sqrt(area/m.pi)
-          pos, size, ang = cv2.minAreaRect(cont)
-          if size[0] >= size[1]:
-            ls = size[0]
-            ns = size[1]
-          else:
-            ls = size[1]
-            ns = size[0]
-            ang = ang + 90        
-          self.data.append([str(filename), x, y, dia, ls, ns, ns/ls, ang])
-    self.drawGraph()
+    if len(self.parent.image_info) > 0:
+      self.clearData()
+      self.pdlg.setValue(0)
+      self.pdlg.open()
+      self.measure.setup(self.parent.image_info)
+      self.measure.start()
+
+  def measureProgress(self, inc, filename, ps):
+    val = self.pdlg.value()
+    self.pdlg.setValue(val+inc)
+    root = self.treemodel.invisibleRootItem()
+    item1 = QtGui.QStandardItem(filename)
+    item1.setEditable(False)
+    item2 = QtGui.QStandardItem('%.3f' % ps[0])
+    item2.setEditable(False)
+    item3 = QtGui.QStandardItem(ps[1])
+    item3.setEditable(False)
+    root.appendRow([item1, item2, item3])
+
+  def measureFinish(self):
+    self.pdlg.hide()
+    if self.measure.data is not None and self.measure.stat is not None:
+      self.data = self.measure.data
+      self.stat = self.measure.stat
+      self.psmin = self.measure.psmin
+      self.afnd = self.measure.afnd
+      self.labelaf.setText('AF : %f' % self.afnd[0])
+      self.labelnd.setText('ND : %f' % self.afnd[1])
+      self.line1.setText('%.3f' % self.psmin[0])
+      self.drawGraph()
+
+  def measureCancel(self):
+    self.measure.terminate()
+
+  def drawSize(self, freq, nclass, dsize, xlabel, ylabel, nsample, stat):
+    self.figure.clf()
+    ax = self.figure.add_subplot(1,1,1)
+    length = np.arange(freq.size)*dsize
+    ax.bar(length, freq, width=dsize, color='white')
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_xlim(0, nclass*dsize)
+    if stat is not None:
+      ax.text(0.6, 0.95, 'NSample : ' + str(nsample), transform=ax.transAxes)
+      ax.text(0.6, 0.9, 'Mean : ' + str(stat[0]), transform=ax.transAxes) 
+      ax.text(0.6, 0.85, 'STD : ' + str(stat[1]), transform=ax.transAxes)
+    self.canvas.draw()
 
   def drawGraph(self):
-    if self.data == None or self.insitu == False:
+    if self.data is None or self.insitu == False:
       return
-    ps = self.parent.pixelsize.data['PS']
-    unit = self.parent.pixelsize.data['UNIT']
+    if len(self.line1.text()) == 0 or float(self.line1.text()) < 1.0e-3:
+      return
+    if self.spin1.value() < 2:
+      return
+    if self.check2.isChecked():
+      stat = self.stat
+    else:
+      stat = [None, None, None, None, None]
     if self.combo1.currentIndex() == 0:
-      cdat = self.colData(3, ps)
-      xlabel = 'Diameter (' + self.scene.unitText(unit) + ')'
+      row = 3
+      nclass = self.spin1.value()
+      dsize = float(self.line1.text())
+      xlabel = 'Diameter (%s)' % PlotUnitText(self.psmin[1])
     elif self.combo1.currentIndex() == 1:
-      cdat = self.colData(4, ps)
-      xlabel = 'Size of long side (' + self.scene.unitText(unit) + ')'
+      row = 4
+      nclass = self.spin1.value()
+      dsize = float(self.line1.text())
+      xlabel = 'Size of long side (%s)' % PlotUnitText(self.psmin[1])
     elif self.combo1.currentIndex() == 2:
-      cdat = self.colData(5, ps)
-      xlabel = 'Size of narrow side (' + self.scene.unitText(unit) + ')'
+      row = 5
+      nclass = self.spin1.value()
+      dsize = float(self.line1.text())
+      xlabel = 'Size of narrow side (%s)' % PlotUnitText(self.psmin[1])
     elif self.combo1.currentIndex() == 3:
-      cdat = self.colData(6)
+      row = 6
+      nclass = 21
+      dsize = 1.0/(nclass-1)
       xlabel = 'Aspect ratio'
     elif self.combo1.currentIndex() == 4:
-      cdat = self.colData(7)
+      row = 7
+      nclass = 21
+      dsize = 1.0/(nclass-1)
+      xlabel = 'Circularity'
+    elif self.combo1.currentIndex() == 5:
+      row = 8
+      nclass = 19
+      dsize = 180.0/(nclass-1)
       xlabel = 'Angle (degree)'
-    self.scene.drawSize(cdat, xlabel, self.spin1.value(), self.check1.isChecked())
-
-  def showEvent(self, event):
-    self.drawGraph()
-
-  def colData(self, ind, ps=None):
-    cdat = []
-    if ps == None:
-      for dat in self.data:
-        cdat.append(dat[ind])
+    nsample = len(self.data)
+    if self.check1.isChecked():
+      freq = MeasureSizeThread.RelativeFrequency(self.data, row, nclass, dsize)
+      self.drawSize(freq, nclass, dsize, xlabel, 'Relative Frequency', nsample, stat[row-3])  
     else:
-      for dat in self.data:
-        cdat.append(dat[ind]*ps)        
-    return np.array(cdat)
+      freq = MeasureSizeThread.Frequency(self.data, row, nclass, dsize)
+      self.drawSize(freq, nclass, dsize, xlabel, 'Frequency', nsample, stat[row-3])
 
   def saveCSV(self):    
     fname = QtGui.QFileDialog.getSaveFileName(self, 'Save CSV', filter='CSV Files (*.csv);;All Files (*.*)')
     if fname:
-      fout = open(fname, 'w')  
-      fout.write('Images,' + str(self.list1.count()) + '\n')
-      for i in range(self.list1.count()):
-        fout.write(self.list1.item(i).text() + '\n')
-      ps = self.parent.pixelsize.data['PS']
-      unit = self.parent.pixelsize.data['UNIT']
-      fout.write('PixelSize,' + str(ps) + ',' + unit + '\n')      
+      fout = open(fname, 'w')
+      nimg = self.treemodel.rowCount()
+      fout.write('Images,' + str(nimg) + '\n')
+      fout.write('ImageID, FileName, PixelSize, Unit\n')
+      for i in range(nimg):
+        fname = self.treemodel.item(i,0).text()
+        ps = self.treemodel.item(i,1).text()
+        unit = self.treemodel.item(i,2).text()
+        fout.write('%d, %s, %s, %s\n' % (i, fname, ps, unit))
+      fout.write('AreaFraction, %f\n' % self.afnd[0])
+      fout.write('NumberDensity, %f\n' % self.afnd[1])
       fout.write('Statistics, NSample, Mean, STD\n')
-      types = [[3, ps, 'Diameter'], [4, ps, 'LongSide'], [5, ps, 'NarrowSide'],\
-        [6, None, 'AspectRatio'], [7, None, 'Angle']]
-      for tp in types:
-        cdat = self.colData(tp[0], tp[1])
-        fout.write(tp[2] + ',' + str(cdat.shape[0]) + ',' + str(cdat.mean()) + ',' + str(cdat.std()) + '\n')
-      fout.write('Filename, X, Y, Diameter, LongSide, NarrowSide, AspectRatio, Angle\n')
+      tt = ['Diameter', 'LongSide', 'NarrowSide', 'AspectRatio', 'Circularity', 'Angle']
+      c = 0 
+      for st in self.stat:
+        fout.write('%s, %d, %f, %f\n' % (tt[c], len(self.data), st[0], st[1]))
+        c += 1
+      fout.write('ImageID, X, Y, Diameter, LongSide, NarrowSide, AspectRatio, Circularity, Angle\n')
       for dat in self.data:
-        fout.write(dat[0] + ',' + str(dat[1]*ps) + ',' + str(dat[2]*ps) + ','\
-          + str(dat[3]*ps) + ',' + str(dat[4]*ps) + ',' + str(dat[5]*ps) + ','\
-          + str(dat[6]) + ',' + str(dat[7]) + '\n')
+        fout.write('%d, %f, %f, %f, %f, %f, %f, %f, %f\n' %\
+                   (dat[0], dat[1], dat[2], dat[3], dat[4], dat[5], dat[6], dat[7], dat[8]))
 
   def saveGraph(self):
     fname = QtGui.QFileDialog.getSaveFileName(self, 'Save Graph', filter='Image Files (*.png *.pdf *.svg);;All Files (*.*)')
     if fname:
-      self.scene.saveGraph(str(fname))
+      self.figure.savefig(str(fname))
       
   def clearData(self):
     self.data = None
-    self.list1.clear()
-    self.scene.clearGraph()
+    self.stat = None
+    self.treemodel.removeRows(0, self.treemodel.rowCount())
+    self.figure.clf()
+    self.canvas.draw()
 
 """
-PixelSize Dialog
+Scale Image Dialog
 """
-class PixelSizeDialog(QtGui.QDialog):
-  def __init__(self, parent, scene):
+class ScaleImageDialog(QtGui.QDialog):
+  def __init__(self, parent):
     QtGui.QDialog.__init__(self, parent)
-    self.scene = scene
-    self.data = {'PS': 1.0, 'UNIT': 'pixel'}
-    self.scene.measurePixel[float].connect(self.measurePixel)
-    self.insitu = True    
-    self.setWindowTitle("Pixel Size")
-    vbox = QtGui.QVBoxLayout(self)
-    vbox.addWidget(QtGui.QLabel('Pixels :'))
+    self.setWindowTitle("Scale Image")
+    self.parent = parent
+    self.insitu = True
+    self.plotimg = None
+    self.plotps = None
+    hbox = QtGui.QHBoxLayout(self)
+    vbox = QtGui.QVBoxLayout()
+    hbox.addLayout(vbox)
+    self.viewer = QtGui.QGraphicsView()
+    self.scene = QtGui.QGraphicsScene()
+    self.viewer.setScene(self.scene)
+    self.figure = Figure()
+    self.figure.subplots_adjust(bottom=0.0, top=1.0, left=0.0, right=1.0)
+    self.canvas = FigureCanvas(self.figure)
+    self.scene.addWidget(self.canvas)
+    hbox.addWidget(self.viewer)
+    self.check1 = QtGui.QCheckBox('Draw Scale')
+    self.check1.setChecked(True)
+    self.check1.stateChanged[int].connect(self.drawImage)
+    vbox.addWidget(self.check1)
+    vbox.addWidget(QtGui.QLabel('Scale :'))
     self.line1 = QtGui.QLineEdit()
     self.line1.setValidator(QtGui.QDoubleValidator())
-    self.line1.textChanged[str].connect(self.calcPS)
+    self.line1.textChanged[str].connect(self.drawImage)
+    self.line1.setText('100')
     vbox.addWidget(self.line1)
-    vbox.addWidget(QtGui.QLabel('Scale :'))
+    vbox.addWidget(QtGui.QLabel('Font Size :'))
+    self.spin1 = QtGui.QSpinBox()
+    self.spin1.setMinimum(1)
+    self.spin1.setMaximum(100)
+    self.spin1.setValue(24)
+    self.spin1.valueChanged.connect(self.drawImage)
+    vbox.addWidget(self.spin1)
+    vbox.addWidget(QtGui.QLabel('Color :'))
+    self.combo1 = QtGui.QComboBox()
+    self.combo1.addItem('Black')
+    self.combo1.addItem('White')
+    self.combo1.addItem('Red')
+    self.combo1.addItem('Green')
+    self.combo1.addItem('Blue')
+    self.combo1.addItem('Cyan')
+    self.combo1.addItem('Magenta')
+    self.combo1.addItem('Yellow')
+    self.combo1.currentIndexChanged.connect(self.drawImage)
+    vbox.addWidget(self.combo1)
+    vbox.addWidget(QtGui.QLabel('DPI :'))
+    self.spin2 = QtGui.QSpinBox()
+    self.spin2.setMinimum(10)
+    self.spin2.setMaximum(3000)
+    self.spin2.setValue(100)
+    vbox.addWidget(self.spin2)
+    vbox.addStretch()
     hbox1 = QtGui.QHBoxLayout()
     vbox.addLayout(hbox1)
-    self.line2 = QtGui.QLineEdit()
-    self.line2.setValidator(QtGui.QDoubleValidator())
-    self.line2.textChanged[str].connect(self.calcPS)
-    hbox1.addWidget(self.line2)
-    self.combo = QtGui.QComboBox()
-    self.combo.addItem('pixel')    
-    self.combo.addItem('km')    
-    self.combo.addItem('m')      
-    self.combo.addItem('cm')
-    self.combo.addItem('mm')
-    self.combo.addItem('um')    
-    self.combo.addItem('nm')
-    self.combo.currentIndexChanged[int].connect(self.calcPS)
-    hbox1.addWidget(self.combo)
-    vbox.addWidget(QtGui.QLabel('Pixel Size :'))
-    self.label = QtGui.QLabel(str(self.data['PS']) + ' ' + self.data['UNIT'])
-    vbox.addWidget(self.label)
-    self.buttonb = QtGui.QDialogButtonBox()
-    vbox.addWidget(self.buttonb)
-    self.buttonb.setStandardButtons(QtGui.QDialogButtonBox.Cancel|QtGui.QDialogButtonBox.Ok)
-    self.buttonb.accepted.connect(self.Accept)
-    self.buttonb.rejected.connect(self.reject)    
+    self.button1 = QtGui.QPushButton('Save Image')
+    self.button1.clicked[bool].connect(self.saveImage)
+    hbox1.addWidget(self.button1)
+    self.button2 = QtGui.QPushButton('Close')
+    self.button2.clicked[bool].connect(self.close)
+    hbox1.addWidget(self.button2)
 
-  def measurePixel(self, dis):
-    self.line1.setText(str(dis))
+  def setInfo(self, info):
+    self.insitu = False
+    self.check1.setChecked(info['DrawScale'])
+    self.line1.setText(info['Scale'])
+    self.spin1.setValue(info['FontSize'])
+    self.combo1.setCurrentIndex(info['Color'])
+    self.spin2.setValue(info['DPI'])
+    self.insitu = True
 
-  def calcPS(self):
-    if len(self.line1.text()) > 0 and len(self.line2.text()) > 0:
-      pixels = float(self.line1.text())
-      scale = float(self.line2.text())
-      if pixels > 0:
-        self.label.setText(str(scale/pixels) + ' ' + self.combo.currentText())
+  def getInfo(self):
+    info = {}
+    info['DrawScale'] = self.check1.isChecked()
+    info['Scale'] = str(self.line1.text())
+    info['FontSize'] = self.spin1.value()
+    info['Color'] = self.combo1.currentIndex()
+    info['DPI'] = self.spin2.value()
+    return info
 
-  def showEvent(self, event):
-    self.line1.setText('')
-    self.line2.setText('')
-    self.label.setText(str(self.data['PS']) + ' ' + self.data['UNIT'])
+  def setImage(self, img, info):
+    if len(img.shape) == 2:
+      self.plotimg = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    elif len(img.shape) == 3:  
+      self.plotimg = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    w = 8.0
+    h = w*img.shape[0]/img.shape[1]
+    self.figure.set_size_inches(w, h)
+    self.plotps = FileWidget.PixelSize(info)
 
-  def Accept(self):
-    ps = str(self.label.text()).split(' ')
-    self.data['PS'] = float(ps[0])
-    self.data['UNIT'] = ps[1]
-    self.accept()
+  def drawScale(self, ax):
+    try:
+      sc = float(self.line1.text())
+    except ValueError:
+      sc = 100
+    clist = ['k', 'w', 'r', 'g', 'b', 'c', 'm', 'y']
+    cl = clist[self.combo1.currentIndex()]
+    ll = sc/self.plotps[0]
+    w = self.plotimg.shape[1]
+    h = self.plotimg.shape[0]
+    y = 0.975*h
+    sx = 0.975*w-ll
+    ex = 0.975*w
+    ax.hlines(y, sx, ex, lw=3, color=cl)
+    txt = '%s%s' % (str(self.line1.text()), PlotUnitText(self.plotps[1]))
+    fs = self.spin1.value()
+    ax.text(sx, 0.965*h, txt, fontsize=fs, color=cl)
+
+  def drawImage(self):
+    if self.plotimg is None or self.insitu == False:
+      return
+    self.figure.clf()
+    ax = self.figure.add_subplot(1,1,1,frameon=False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+    ax.imshow(self.plotimg)
+    if self.check1.isChecked():
+      self.drawScale(ax)
+    self.canvas.draw()
+
+  def saveImage(self):
+    fname = QtGui.QFileDialog.getSaveFileName(self, 'Save Figure', filter='Image Files (*.png *.pdf *.svg);;All Files (*.*)')
+    if fname:
+      self.figure.savefig(str(fname), dpi=self.spin2.value())
 
 """
 MainWindow
@@ -1741,53 +2136,91 @@ class MainWindow(QtGui.QMainWindow):
     self.current_file = None
     splitter = QtGui.QSplitter()
     self.setCentralWidget(splitter)
-    self.MainMenuBar()
-    self.MainToolBar()
+    vsplitter = QtGui.QSplitter()
+    vsplitter.setOrientation(QtCore.Qt.Vertical)
+    splitter.addWidget(vsplitter)
+    self.mainMenuBar()
+    self.mainToolBar()
     self.tab = QtGui.QTabWidget()
-    self.tab.currentChanged[int].connect(self.SceneChanged)    
+    self.tab.currentChanged[int].connect(self.sceneChanged)
+    vsplitter.addWidget(self.tab)
+    imglist = QtGui.QWidget()
+    vsplitter.addWidget(imglist)
+    vbox = QtGui.QVBoxLayout(imglist)
+    self.image_list = QtGui.QListWidget()
+    self.image_list.currentRowChanged.connect(self.imageChanged)
+    vbox.addWidget(self.image_list)
+    hbox = QtGui.QHBoxLayout()
+    vbox.addLayout(hbox)
+    button1 = QtGui.QPushButton('Add Image')
+    button1.clicked[bool].connect(self.addImage)
+    hbox.addWidget(button1)
+    button2 = QtGui.QPushButton('Delete Image')
+    button2.clicked[bool].connect(self.deleteImage)
+    hbox.addWidget(button2)
     #self.tab.setMinimumWidth(200)
     #self.tab.setMaximumWidth(400)
     self.viewer = GraphicsView()
     self.scene = ImageScene()
     self.viewer.setScene(self.scene)
-    splitter.addWidget(self.tab)
     splitter.addWidget(self.viewer)
-    self.file = FileWidget(self, self.scene)
+    self.file = FileWidget(self)
+    self.scene.measurePixel[float].connect(self.file.measurePixel)
+    self.file.imageChanged.connect(self.scene.setImage)
+    self.file.roiChanged.connect(self.scene.drawROI)
     self.tab.addTab(self.file, 'Src')
-    self.filter = FilterWidget(self, self.scene)
+    self.cont = ContrastWidget(self)
+    self.cont.imageChanged.connect(self.scene.setImage)
+    self.tab.addTab(self.cont, 'Cont')
+    self.filter = FilterWidget(self)
+    self.filter.imageChanged.connect(self.scene.setImage)
     self.tab.addTab(self.filter, 'Fil')
-    self.threshold = ThresholdWidget(self, self.scene)
+    self.threshold = ThresholdWidget(self)
+    self.threshold.imageChanged.connect(self.scene.setImage)
     self.tab.addTab(self.threshold, 'Thresh')
-    self.morphology = MorphologyWidget(self, self.scene)    
+    self.morphology = MorphologyWidget(self)
+    self.morphology.imageChanged.connect(self.scene.setImage)
     self.tab.addTab(self.morphology, 'Mor')
-    self.modify = ModifyWidget(self, self.scene)
+    self.modify = ModifyWidget(self)
+    self.modify.imageChanged.connect(self.scene.setImage)
+    self.modify.mouseModeChanged.connect(self.scene.setMouseMode)
+    self.scene.addLine[float, float, float, float].connect(self.modify.addLine)
+    self.scene.addRect[float, float, float, float].connect(self.modify.addRect)
+    self.scene.clearRect[float, float, float, float].connect(self.modify.clearRect)    
     self.tab.addTab(self.modify, 'Mod')
-    self.pixelsize = PixelSizeDialog(self, self.scene)
-    self.pixelsize.finished.connect(self.measurePSClose)
     self.imfp = IMFPDialog(self)
     self.ln2d = LN2DDialog(self)
     self.size = SizeDialog(self)
+    self.scale = ScaleImageDialog(self)
 
-  def SceneChanged(self):
+  def sceneChanged(self):
     self.scene.clearAll()
     self.scene.mouseMode = self.scene.mouseNone
     if self.tab.currentIndex() == 0:
       self.file.setImage()
+      self.scene.mouseMode = self.scene.mouseMeasure
     elif self.tab.currentIndex() == 1:
-      self.filter.src_img = self.file.Process(self.file.org_img, self.file.getInfo())
-      self.filter.setImage()
+      self.cont.src_img = self.file.Process(self.file.org_img, self.file.getInfo())
+      self.cont.setImage()
     elif self.tab.currentIndex() == 2:
       roi_img = self.file.Process(self.file.org_img, self.file.getInfo())
-      self.threshold.src_img = self.filter.Process(roi_img, self.filter.getInfo())
-      self.threshold.setImage()
+      self.filter.src_img = self.cont.Process(roi_img, self.cont.getInfo())
+      self.filter.setImage()
     elif self.tab.currentIndex() == 3:
       roi_img = self.file.Process(self.file.org_img, self.file.getInfo())
-      filter_img = self.filter.Process(roi_img, self.filter.getInfo())
-      self.morphology.src_img = self.threshold.Process(filter_img, self.threshold.getInfo())
-      self.morphology.setImage()
+      cont_img = self.cont.Process(roi_img, self.cont.getInfo())
+      self.threshold.src_img = self.filter.Process(cont_img, self.filter.getInfo())
+      self.threshold.setImage()
     elif self.tab.currentIndex() == 4:
       roi_img = self.file.Process(self.file.org_img, self.file.getInfo())
-      filter_img = self.filter.Process(roi_img, self.filter.getInfo())
+      cont_img = self.cont.Process(roi_img, self.cont.getInfo())
+      filter_img = self.filter.Process(cont_img, self.filter.getInfo())
+      self.morphology.src_img = self.threshold.Process(filter_img, self.threshold.getInfo())
+      self.morphology.setImage()
+    elif self.tab.currentIndex() == 5:
+      roi_img = self.file.Process(self.file.org_img, self.file.getInfo())
+      cont_img = self.cont.Process(roi_img, self.cont.getInfo())
+      filter_img = self.filter.Process(cont_img, self.filter.getInfo())
       thresh_img = self.threshold.Process(filter_img, self.threshold.getInfo())
       self.modify.src_img = self.morphology.Process(thresh_img, self.morphology.getInfo())
       if roi_img is not None:
@@ -1795,7 +2228,7 @@ class MainWindow(QtGui.QMainWindow):
       self.modify.setImage()
       self.modify.setMouseMode()
 
-  def MainMenuBar(self):
+  def mainMenuBar(self):
     menubar = QtGui.QMenuBar(self)
     self.setMenuBar(menubar)
     file_menu = QtGui.QMenu('File', self) 
@@ -1803,14 +2236,17 @@ class MainWindow(QtGui.QMainWindow):
     file_menu.addAction('Save', self.fileSave)
     file_menu.addAction('Save As', self.fileSaveAs)
     file_menu.addAction('Clear All', self.clearAllMsg)
-    file_menu.addAction('Quit', QtCore.QCoreApplication.instance().quit)   
+    file_menu.addAction('Save Image', self.saveImage)
+    file_menu.addAction('Quit', self.close)   
     menubar.addMenu(file_menu)
     mes_menu = QtGui.QMenu('Measure', self)
-    mes_menu.addAction('Pixel Size', self.measurePS)
     mes_menu.addAction('IMFP', self.measureIMFP)
     mes_menu.addAction('LN2D', self.measureLN2D)
     mes_menu.addAction('Size', self.measureSize)
     menubar.addMenu(mes_menu)
+    misc_menu = QtGui.QMenu('Misc', self)
+    misc_menu.addAction('Scale Image', self.miscScaleImage)
+    menubar.addMenu(misc_menu)
 
   def clearAllMsg(self):
     msgbox = QtGui.QMessageBox(self)
@@ -1861,33 +2297,23 @@ class MainWindow(QtGui.QMainWindow):
       self.image_info = self.checkImageInfo(fname, data['ImageInfo'])
       for info in self.image_info:
         self.image_list.addItem(QtCore.QFileInfo(info['FileName']).fileName())
-      image_num = len(self.image_info)
-      image_index = data['ImageIndex']
-      if image_index < image_num:          
-        self.image_list.setCurrentIndex(image_index)
-      else:
-        self.image_list.setCurrentIndex(image_num-1)
-      self.scale_slider.setValue(data['ImageScale'])
-      self.pixelsize.data = data['PixelSize']
+      self.image_list.setCurrentRow(self.image_list.count()-1)
       self.imfp.setInfo(data['IMFPInfo'])
       self.ln2d.setInfo(data['LN2DInfo'])
       self.size.setInfo(data['SizeInfo'])
-      self.tab.setCurrentIndex(data['TabIndex'])
+      self.scale.setInfo(data['ScaleInfo'])
       self.current_file = fname 
       
   def fileSave(self):
     if self.current_file != None:
       fout = open(self.current_file, 'w')
       data = {}
-      self.UpdateImageInfo()
+      self.updateImageInfo()
       data['ImageInfo'] = self.image_info
-      data['ImageIndex'] = self.image_list.currentIndex()
-      data['ImageScale'] = self.scale_slider.value()
-      data['PixelSize'] = self.pixelsize.data
       data['IMFPInfo'] = self.imfp.getInfo()
       data['LN2DInfo'] = self.ln2d.getInfo()
       data['SizeInfo'] = self.size.getInfo()
-      data['TabIndex'] = self.tab.currentIndex()
+      data['ScaleInfo'] = self.scale.getInfo()
       json.dump(data, fout)
       fout.close()
     else:
@@ -1899,46 +2325,34 @@ class MainWindow(QtGui.QMainWindow):
       self.current_file = fname
       self.fileSave()
 
-  def measurePS(self):
-    if self.pixelsize.isHidden():
-      self.scene.mouseMode = self.scene.mouseMeasure
-      self.pixelsize.show()
-    else:
-      self.pixelsize.activateWindow()
-
-  def measurePSClose(self):
-    self.scene.mouseMode = self.scene.mouseNone
-
+  def saveImage(self):
+    if self.scene.cvimg is not None:
+      fname = QtGui.QFileDialog.getSaveFileName(self, 'Save image', filter='Image Files (*.jpg *.png *.bmp *.ppm);;All Files (*.*)')
+      if fname:
+        cv2.imwrite(str(fname), self.scene.cvimg)
+        
   def measureIMFP(self):
-    self.UpdateImageInfo()
+    self.updateImageInfo()
     self.imfp.exec_()
 
   def measureLN2D(self):
-    self.UpdateImageInfo()
+    self.updateImageInfo()
     self.ln2d.exec_()
 
   def measureSize(self):
-    self.UpdateImageInfo()
+    self.updateImageInfo()
     self.size.exec_()
 
-  def MainToolBar(self):
+  def miscScaleImage(self):
+    if self.scene.cvimg is not None:
+      self.updateImageInfo()
+      self.scale.setImage(self.scene.cvimg, self.image_info[self.image_index])
+      self.scale.drawImage()
+      self.scale.exec_()
+
+  def mainToolBar(self):
     toolbar = QtGui.QToolBar(self)
     self.addToolBar(toolbar)
-    button1 = QtGui.QPushButton('Add Image')
-    button1.clicked[bool].connect(self.AddImage)
-    toolbar.addWidget(button1)
-    button2 = QtGui.QPushButton('Delete Image')
-    button2.clicked[bool].connect(self.DeleteImage)
-    toolbar.addWidget(button2)    
-    self.image_list = QtGui.QComboBox()    
-    self.image_list.setMinimumWidth(120)
-    self.image_list.currentIndexChanged[int].connect(self.ImageChanged)
-    toolbar.addWidget(self.image_list)
-    toolbar.addSeparator()
-    button4 = QtGui.QPushButton('Save Image')
-    button4.clicked[bool].connect(self.saveImage)
-    toolbar.addWidget(button4)
-    toolbar.addSeparator()
     self.scale_label = QtGui.QLabel('100%')
     self.scale_label.setFixedWidth(30)
     toolbar.addWidget(self.scale_label)        
@@ -1947,76 +2361,83 @@ class MainWindow(QtGui.QMainWindow):
     self.scale_slider.setMinimum(5)
     self.scale_slider.setMaximum(200)
     self.scale_slider.setValue(100)
-    self.scale_slider.valueChanged[int].connect(self.ChangeScale)
+    self.scale_slider.valueChanged[int].connect(self.changeScale)
     toolbar.addWidget(self.scale_slider)
     button3 = QtGui.QPushButton('Fit')
     button3.setFixedWidth(35)
-    button3.clicked[bool].connect(self.FitScale)
+    button3.clicked[bool].connect(self.fitScale)
     toolbar.addWidget(button3)    
 
-  def AddImage(self):
-    fname = QtGui.QFileDialog.getOpenFileName(self, 'Add Image', filter='Image Files (*.jpg *.png *.tif *.bmp);;All Files (*.*)')
-    if fname:
-      info = {"FileName":str(fname)}
-      info.update(self.file.getInfo(fname))
-      info.update(self.filter.getInfo())
-      info.update(self.threshold.getInfo())
-      info.update(self.morphology.getInfo())
-      info.update(self.modify.getInfo(False))
-      self.image_info.append(info)
-      self.image_list.addItem(QtCore.QFileInfo(fname).fileName())
-      self.image_list.setCurrentIndex(self.image_list.count()-1)
+  def addImage(self):
+    fnames = QtGui.QFileDialog.getOpenFileNames(self, 'Add Image', filter='Image Files (*.jpg *.png *.tif *.bmp);;All Files (*.*)')
+    if len(fnames) > 0:
+      for fname in fnames:
+        info = {"FileName":str(fname)}
+        info.update(self.file.getInfo(fname))
+        info.update(self.cont.getInfo())
+        info.update(self.filter.getInfo())
+        info.update(self.threshold.getInfo())
+        info.update(self.morphology.getInfo())
+        info.update(self.modify.getInfo(False))
+        self.image_info.append(info)
+        self.image_list.addItem(QtCore.QFileInfo(fname).fileName())
+      self.image_list.setCurrentRow(self.image_list.count()-1)
 
-  def DeleteImage(self):
+  def deleteImage(self):
     msgbox = QtGui.QMessageBox(self)
-    msgbox.setText('Do you want to clear the current image ?')
+    item = self.image_list.currentItem()
+    msgbox.setText('Do you want to delete %s ?' % item.text())
     msgbox.setStandardButtons(QtGui.QMessageBox.Yes | QtGui.QMessageBox.No);
     msgbox.setDefaultButton(QtGui.QMessageBox.No);
     if msgbox.exec_() == QtGui.QMessageBox.Yes:
+      row = self.image_list.currentRow()
+      self.image_info.pop(row)
+      self.image_list.clear()
+      for info in self.image_info:
+        self.image_list.addItem(QtCore.QFileInfo(info['FileName']).fileName())
+      nrow = row - 1
+      if nrow < 0:
+        nrow = 0
       self.image_index = -1
-      index = self.image_list.currentIndex()
-      self.image_info.pop(index)
-      self.image_list.removeItem(index)
+      self.image_list.setCurrentRow(nrow)
 
-  def UpdateImageInfo(self):
-    if self.image_index >= 0:   
-      self.image_info[self.image_index].update(self.file.getInfo())
-      self.image_info[self.image_index].update(self.filter.getInfo())
-      self.image_info[self.image_index].update(self.threshold.getInfo())
-      self.image_info[self.image_index].update(self.morphology.getInfo())
-      self.image_info[self.image_index].update(self.modify.getInfo())   
+  def updateImageInfo(self):
+    index = self.image_index
+    if index >= 0 and index < len(self.image_info): 
+      self.image_info[index].update(self.file.getInfo())
+      self.image_info[index].update(self.cont.getInfo())
+      self.image_info[index].update(self.filter.getInfo())
+      self.image_info[index].update(self.threshold.getInfo())
+      self.image_info[index].update(self.morphology.getInfo())
+      self.image_info[index].update(self.modify.getInfo())   
 
-  def ImageChanged(self):
-    self.UpdateImageInfo()
-    if self.image_list.currentIndex() >= 0:
-      info = self.image_info[self.image_list.currentIndex()]
+  def imageChanged(self):
+    self.updateImageInfo()
+    row = self.image_list.currentRow()
+    if row >= 0:
+      info = self.image_info[row]
       self.file.setInfo(info)
+      self.cont.setInfo(info)
       self.filter.setInfo(info)
       self.threshold.setInfo(info)
       self.morphology.setInfo(info)
       self.modify.setInfo(info)
       self.file.org_img = cv2.imread(info['FileName'], 1)
-      self.SceneChanged()
-      self.image_index = self.image_list.currentIndex()
+      self.sceneChanged()
+      self.image_index = row
     else:
       self.file.clearFile()
       self.morphology.clearLabel()
       self.scene.clearAll()
 
-  def ChangeScale(self):
+  def changeScale(self):
     val = self.scale_slider.value()
     self.scale_label.setText(str(val) + '%')
     self.scene.setScale(val / 100.0)
     
-  def FitScale(self):
+  def fitScale(self):
     s = int(self.scene.calcFitScale() * 100.0)
     self.scale_slider.setValue(s)
-
-  def saveImage(self):
-    if self.scene.pixmap != None:
-      fname = QtGui.QFileDialog.getSaveFileName(self, 'Save image', filter='Image Files (*.jpg *.png *.bmp *.ppm);;All Files (*.*)')
-      if fname:
-        self.scene.pixmap.save(fname)
  
 if __name__ == '__main__':
   app = QtGui.QApplication(sys.argv)
