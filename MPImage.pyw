@@ -190,7 +190,7 @@ File Widget
 class FileWidget(QtGui.QWidget):
   imageChanged = QtCore.pyqtSignal(np.ndarray)
   roiChanged = QtCore.pyqtSignal(int, int, int, int)
-  Units = ['pixel', 'km', 'm', 'cm', 'mm', 'um', 'nm' ]
+  Units = ['px', 'km', 'm', 'cm', 'mm', 'um', 'nm' ]
   
   def __init__(self, parent):
     super(FileWidget, self).__init__(parent)
@@ -1091,9 +1091,13 @@ class IMFPDialog(QtGui.QDialog):
     hbox = QtGui.QHBoxLayout(self)
     vbox = QtGui.QVBoxLayout()
     hbox.addLayout(vbox)
+    self.viewer = QtGui.QGraphicsView()
+    self.scene = QtGui.QGraphicsScene()
+    self.viewer.setScene(self.scene)
     self.figure = Figure()
     self.canvas = FigureCanvas(self.figure)
-    hbox.addWidget(self.canvas)
+    self.scene.addWidget(self.canvas)
+    hbox.addWidget(self.viewer)
     vbox.addWidget(QtGui.QLabel('Barrier :'))
     self.combo0 = QtGui.QComboBox()
     self.combo0.addItem('White')  
@@ -1148,7 +1152,13 @@ class IMFPDialog(QtGui.QDialog):
     self.check2 = QtGui.QCheckBox('Show Statistics')
     self.check2.setChecked(True)
     self.check2.stateChanged[int].connect(self.drawGraph)
-    vbox.addWidget(self.check2)    
+    vbox.addWidget(self.check2)
+    vbox.addWidget(QtGui.QLabel('DPI :'))
+    self.spin4 = QtGui.QSpinBox()
+    self.spin4.setMinimum(10)
+    self.spin4.setMaximum(3000)
+    self.spin4.setValue(100)
+    vbox.addWidget(self.spin4)
     vbox.addStretch()
     hbox1 = QtGui.QHBoxLayout()
     vbox.addLayout(hbox1)
@@ -1173,6 +1183,7 @@ class IMFPDialog(QtGui.QDialog):
     self.check1.setChecked(info['RelativeFrequency'])
     self.check2.setChecked(info['ShowStatistics'])
     self.insitu = True
+    self.spin4.setValue(info['DPI'])
     self.treemodel.removeRows(0, self.treemodel.rowCount())
 
   def getInfo(self):
@@ -1185,6 +1196,7 @@ class IMFPDialog(QtGui.QDialog):
     info['PlotClassMax'] = self.spin3.value()
     info['RelativeFrequency'] = self.check1.isChecked()
     info['ShowStatistics'] = self.check2.isChecked()
+    info['DPI'] = self.spin4.value()
     return info
 
   def measureIMFP(self):
@@ -1295,7 +1307,7 @@ class IMFPDialog(QtGui.QDialog):
       return
     fname = QtGui.QFileDialog.getSaveFileName(self, 'Save Graph', filter='Image Files (*.png *.pdf *.svg);;All Files (*.*)')
     if fname:
-      self.figure.savefig(str(fname))    
+      self.figure.savefig(str(fname), dpi=self.spin4.value())    
 
   def clearFreq(self):
     self.freq = None
@@ -1394,9 +1406,13 @@ class LN2DDialog(QtGui.QDialog):
     hbox = QtGui.QHBoxLayout(self)
     vbox = QtGui.QVBoxLayout()
     hbox.addLayout(vbox)
+    self.viewer = QtGui.QGraphicsView()
+    self.scene = QtGui.QGraphicsScene()
+    self.viewer.setScene(self.scene)
     self.figure = Figure()
     self.canvas = FigureCanvas(self.figure)
-    hbox.addWidget(self.canvas)
+    self.scene.addWidget(self.canvas)
+    hbox.addWidget(self.viewer)
     vbox.addWidget(QtGui.QLabel('NSample (x10000) :'))
     self.spin1 = QtGui.QSpinBox()
     self.spin1.setMinimum(1)
@@ -1458,6 +1474,12 @@ class LN2DDialog(QtGui.QDialog):
     self.check3.setChecked(True)
     self.check3.stateChanged[int].connect(self.drawGraph)
     vbox.addWidget(self.check3)
+    vbox.addWidget(QtGui.QLabel('DPI :'))
+    self.spin5 = QtGui.QSpinBox()
+    self.spin5.setMinimum(10)
+    self.spin5.setMaximum(3000)
+    self.spin5.setValue(100)
+    vbox.addWidget(self.spin5)    
     vbox.addStretch()
     hbox1 = QtGui.QHBoxLayout()
     vbox.addLayout(hbox1)
@@ -1483,6 +1505,7 @@ class LN2DDialog(QtGui.QDialog):
     self.check2.setChecked(info['ShowStatistics'])
     self.check3.setChecked(info['ShowReference'])
     self.insitu = True
+    self.spin5.setValue(info['DPI'])
     self.treemodel.removeRows(0, self.treemodel.rowCount())
 
   def getInfo(self):
@@ -1496,6 +1519,7 @@ class LN2DDialog(QtGui.QDialog):
     info['RelativeFrequency'] = self.check1.isChecked()
     info['ShowStatistics'] = self.check2.isChecked()
     info['ShowReference'] = self.check3.isChecked()
+    info['DPI'] = self.spin5.value()
     return info
 
   def measureLN2D(self):
@@ -1624,7 +1648,7 @@ class LN2DDialog(QtGui.QDialog):
   def saveGraph(self):
     fname = QtGui.QFileDialog.getSaveFileName(self, 'Save Graph', filter='Image Files (*.png *.pdf *.svg);;All Files (*.*)')
     if fname:
-      self.figure.savefig(str(fname))    
+      self.figure.savefig(str(fname), dpi=self.spin5.value())    
 
   def clearFreq(self):
     self.freq = None
@@ -1775,9 +1799,13 @@ class SizeDialog(QtGui.QDialog):
     hbox = QtGui.QHBoxLayout(self)
     vbox = QtGui.QVBoxLayout()
     hbox.addLayout(vbox)
+    self.viewer = QtGui.QGraphicsView()
+    self.scene = QtGui.QGraphicsScene()
+    self.viewer.setScene(self.scene)
     self.figure = Figure()
     self.canvas = FigureCanvas(self.figure)
-    hbox.addWidget(self.canvas)
+    self.scene.addWidget(self.canvas)
+    hbox.addWidget(self.viewer)
     self.button1 = QtGui.QPushButton('Measure')
     self.button1.clicked[bool].connect(self.measureSize)
     vbox.addWidget(self.button1)
@@ -1825,6 +1853,12 @@ class SizeDialog(QtGui.QDialog):
     self.check2.setChecked(True)
     self.check2.stateChanged[int].connect(self.drawGraph)
     vbox.addWidget(self.check2)
+    vbox.addWidget(QtGui.QLabel('DPI :'))
+    self.spin2 = QtGui.QSpinBox()
+    self.spin2.setMinimum(10)
+    self.spin2.setMaximum(3000)
+    self.spin2.setValue(100)
+    vbox.addWidget(self.spin2)
     vbox.addStretch()    
     hbox1 = QtGui.QHBoxLayout()
     vbox.addLayout(hbox1)
@@ -1846,6 +1880,7 @@ class SizeDialog(QtGui.QDialog):
     self.check1.setChecked(info['RelativeFrequency'])
     self.check2.setChecked(info['ShowStatistics'])
     self.insitu = True
+    self.spin2.setValue(info['DPI'])
     self.treemodel.removeRows(0, self.treemodel.rowCount())
 
   def getInfo(self):
@@ -1855,6 +1890,7 @@ class SizeDialog(QtGui.QDialog):
     info['DSize'] = str(self.line1.text())
     info['RelativeFrequency'] = self.check1.isChecked()
     info['ShowStatistics'] = self.check2.isChecked()
+    info['DPI'] = self.spin2.value()
     return info
 
   def measureSize(self):
@@ -1983,7 +2019,7 @@ class SizeDialog(QtGui.QDialog):
   def saveGraph(self):
     fname = QtGui.QFileDialog.getSaveFileName(self, 'Save Graph', filter='Image Files (*.png *.pdf *.svg);;All Files (*.*)')
     if fname:
-      self.figure.savefig(str(fname))
+      self.figure.savefig(str(fname), dpi=self.spin2.value())
       
   def clearData(self):
     self.data = None
@@ -2065,8 +2101,8 @@ class ScaleImageDialog(QtGui.QDialog):
     self.line1.setText(info['Scale'])
     self.spin1.setValue(info['FontSize'])
     self.combo1.setCurrentIndex(info['Color'])
-    self.spin2.setValue(info['DPI'])
     self.insitu = True
+    self.spin2.setValue(info['DPI'])
 
   def getInfo(self):
     info = {}
@@ -2091,7 +2127,7 @@ class ScaleImageDialog(QtGui.QDialog):
     try:
       sc = float(self.line1.text())
     except ValueError:
-      sc = 100
+      sc = 0
     clist = ['k', 'w', 'r', 'g', 'b', 'c', 'm', 'y']
     cl = clist[self.combo1.currentIndex()]
     ll = sc/self.plotps[0]
@@ -2102,8 +2138,11 @@ class ScaleImageDialog(QtGui.QDialog):
     ex = 0.975*w
     ax.hlines(y, sx, ex, lw=3, color=cl)
     txt = '%s%s' % (str(self.line1.text()), PlotUnitText(self.plotps[1]))
+    txtc = len('%s%s' % (str(self.line1.text()), self.plotps[1]))
     fs = self.spin1.value()
-    ax.text(sx, 0.965*h, txt, fontsize=fs, color=cl)
+    tw = 0.00124*w*txtc*fs
+    ts = sx+ll/2-tw/2
+    ax.text(ts, 0.96*h, txt, fontsize=fs, color=cl)
 
   def drawImage(self):
     if self.plotimg is None or self.insitu == False:
@@ -2302,7 +2341,9 @@ class MainWindow(QtGui.QMainWindow):
       self.ln2d.setInfo(data['LN2DInfo'])
       self.size.setInfo(data['SizeInfo'])
       self.scale.setInfo(data['ScaleInfo'])
-      self.current_file = fname 
+      self.current_file = fname
+      wt = 'MPImage - %s' % str(QtCore.QFileInfo(fname).fileName())
+      self.setWindowTitle(self.tr(wt))
       
   def fileSave(self):
     if self.current_file != None:
@@ -2314,7 +2355,7 @@ class MainWindow(QtGui.QMainWindow):
       data['LN2DInfo'] = self.ln2d.getInfo()
       data['SizeInfo'] = self.size.getInfo()
       data['ScaleInfo'] = self.scale.getInfo()
-      json.dump(data, fout)
+      json.dump(data, fout, indent=2, sort_keys=True)
       fout.close()
     else:
       self.fileSaveAs()
@@ -2323,6 +2364,8 @@ class MainWindow(QtGui.QMainWindow):
     fname = QtGui.QFileDialog.getSaveFileName(self, 'Save', filter='JSON Files (*.json);;All Files (*.*)')
     if fname:
       self.current_file = fname
+      wt = 'MPImage - %s' % str(QtCore.QFileInfo(fname).fileName())
+      self.setWindowTitle(self.tr(wt))
       self.fileSave()
 
   def saveImage(self):
