@@ -3,10 +3,16 @@
 #include "MPLn23d.h"
 #include <numpy/arrayobject.h>
 
+#if PY_MAJOR_VERSION >= 3
+#define PY3
+#endif
+
 static void PyLn3dDealloc(MP_Ln3dData* self)
 {
 	MP_Ln3dFree(self);
+#ifndef PY3
 	self->ob_type->tp_free((PyObject*)self);
+#endif
 }
 
 static PyObject *PyLn3dNew(PyTypeObject *type, PyObject *args, PyObject *kwds)
@@ -165,7 +171,9 @@ static PyMethodDef PyLn3dMethods[] = {
 
 static PyTypeObject PyLn3dNewType = {
 	PyObject_HEAD_INIT(NULL)
+#ifndef PY3
 	0,							/*ob_size*/
+#endif
 	"MPLn23d.ln3d_new",			/*tp_name*/
 	sizeof(MP_Ln3dData),		/*tp_basicsize*/
 	0,							/*tp_itemsize*/
@@ -208,7 +216,9 @@ static PyTypeObject PyLn3dNewType = {
 static void PyLn2dDealloc(MP_Ln2dData* self)
 {
 	MP_Ln2dFree(self);
+#ifndef PY3
 	self->ob_type->tp_free((PyObject*)self);
+#endif
 }
 
 static PyObject *PyLn2dNew(PyTypeObject *type, PyObject *args, PyObject *kwds)
@@ -408,7 +418,9 @@ static PyMethodDef PyLn2dMethods[] = {
 
 static PyTypeObject PyLn2dNewType = {
 	PyObject_HEAD_INIT(NULL)
+#ifndef PY3
 	0,							/*ob_size*/
+#endif
 	"MPLn23d.ln2d_new",			/*tp_name*/
 	sizeof(MP_Ln2dData),		/*tp_basicsize*/
 	0,							/*tp_itemsize*/
@@ -484,22 +496,43 @@ static PyMethodDef MPLn23dPyMethods[] = {
 	{ NULL }  /* Sentinel */
 };
 
-#ifndef PyMODINIT_FUNC	/* declarations for DLL import/export */
-#define PyMODINIT_FUNC void
+#ifdef PY3
+static struct PyModuleDef Ln23dModuleDef = {
+	PyModuleDef_HEAD_INIT,
+	"MPLn23d",
+	NULL,
+	-1,
+	MPLn23dPyMethods,
+};
 #endif
+
+#ifndef PY3
 PyMODINIT_FUNC initMPLn23d(void)
+#else
+PyMODINIT_FUNC PyInit_MPLn23d(void)
+#endif
 {
 	PyObject *m;
 
+#ifndef PY3
 	if (PyType_Ready(&PyLn3dNewType) < 0) return;
 	if (PyType_Ready(&PyLn2dNewType) < 0) return;
 	m = Py_InitModule3("MPLn23d", MPLn23dPyMethods, "MPLn23d extention");
 	if (m == NULL) return;
+#else
+	if (PyType_Ready(&PyLn3dNewType) < 0) return NULL;
+	if (PyType_Ready(&PyLn2dNewType) < 0) return NULL;
+	m = PyModule_Create(&Ln23dModuleDef);
+	if (m == NULL) return NULL;
+#endif
 	import_array();
 	Py_INCREF(&PyLn3dNewType);
 	PyModule_AddObject(m, "ln3d_new", (PyObject *)&PyLn3dNewType);
 	Py_INCREF(&PyLn2dNewType);
 	PyModule_AddObject(m, "ln2d_new", (PyObject *)&PyLn2dNewType);
+#ifdef PY3
+	return m;
+#endif
 }
 
 #endif /* _DEBUG */

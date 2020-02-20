@@ -4,6 +4,10 @@
 #include <numpy/arrayobject.h>
 #include "MPImfp.h"
 
+#if PY_MAJOR_VERSION >= 3
+#define PY3
+#endif
+
 static PyObject *PyImfpMeasure(PyObject *self, PyObject *args, PyObject *kwds)
 {	
 	PyObject *img_obj, *f_obj;
@@ -59,13 +63,30 @@ static PyMethodDef PyImfpMethods[] = {
 	{ NULL }  /* Sentinel */
 };
 
-#ifndef PyMODINIT_FUNC	/* declarations for DLL import/export */
-#define PyMODINIT_FUNC void
+#ifdef PY3
+static struct PyModuleDef IMFPModuleDef = {
+	PyModuleDef_HEAD_INIT,
+	"MPImfp",
+	NULL,
+	-1,
+	PyImfpMethods,
+};
 #endif
+
+#ifndef PY3
 PyMODINIT_FUNC initMPImfp(void)
 {
 	Py_InitModule3("MPImfp", PyImfpMethods, "MPImfp extention");
 	import_array();
+	return;
 }
+#else
+PyMODINIT_FUNC PyInit_MPImfp(void)
+{
+	PyObject* m = PyModule_Create(&IMFPModuleDef);
+	import_array();
+	return m;
+}
+#endif
 
 #endif /* _DEBUG */
