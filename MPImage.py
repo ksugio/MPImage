@@ -2382,7 +2382,7 @@ class MainWindow(QtWidgets.QMainWindow):
     mes_menu.addAction('IMFP', self.measureIMFP)
     mes_menu.addAction('LN2D', self.measureLN2D)
     mes_menu.addAction('Size', self.measureSize)
-    mes_menu.addAction('ML Data', self.measureMLData)
+    #mes_menu.addAction('ML Data', self.measureMLData)
     menubar.addMenu(mes_menu)
     misc_menu = QtWidgets.QMenu('Misc', self)
     misc_menu.addAction('Scale Image', self.miscScaleImage)
