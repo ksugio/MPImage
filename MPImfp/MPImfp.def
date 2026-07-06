@@ -1,3 +1,0 @@
-LIBRARY	"MPImfp"
-EXPORTS
-     MP_ImfpMeasure
